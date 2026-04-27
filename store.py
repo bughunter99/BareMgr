@@ -32,7 +32,7 @@ class Store:
         )
         cursor.execute(
             f'CREATE TABLE IF NOT EXISTS "{table}" '
-            f'(id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            f'(_rowid INTEGER PRIMARY KEY AUTOINCREMENT, '
             f'collected_at TEXT DEFAULT CURRENT_TIMESTAMP, '
             f'{cols})'
         )
