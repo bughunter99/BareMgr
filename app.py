@@ -28,7 +28,9 @@ from typing import Any
 
 from collector import BaseCollector
 from config_loader import load_config
-from failover_zmq import FailoverNode
+from failover import Failovernode
+from failover_db import FailoverNode_db
+from failover_zmq import FailoverNode_zmq
 from logger import Logger
 from oracle_collector import OracleCollector
 from replicator import Replicator
@@ -61,7 +63,7 @@ class App:
         self._collectors: list[BaseCollector] = self._build_collectors()
 
         # ── Failover 노드 ────────────────────────────────────────────
-        self._node = FailoverNode(config_file=config_file, logger=self._logger)
+        self._node: Failovernode = self._build_failover_node(config_file)
 
         # 상태 전환 감시 스레드
         self._prev_active: bool | None = None
@@ -94,6 +96,17 @@ class App:
             )
 
         return collectors
+
+    def _build_failover_node(self, config_file: str) -> Failovernode:
+        failover_cfg = self._cfg.get("failover", {})
+        backend = str(failover_cfg.get("backend", "zmq")).strip().lower()
+
+        if backend == "zmq":
+            return FailoverNode_zmq(config_file=config_file, logger=self._logger)
+        if backend == "db":
+            return FailoverNode_db(config_file=config_file, logger=self._logger)
+
+        raise ValueError(f"Unsupported failover.backend: {backend}")
 
     # ── 수집 콜백 (active일 때 peer로 복제) ─────────────────────────
     def _on_collect(self, table: str, rows: list[dict]) -> None:

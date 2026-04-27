@@ -2,13 +2,15 @@
 """
 store.py — Thread-safe SQLite 저장소.
 
-· 테이블은 최초 upsert 시 자동 생성된다.
+· sqlite.path는 디렉토리 경로로 사용한다.
+· 테이블마다 별도 SQLite 파일(<table>.db)을 생성한다.
 · 컬럼은 dict 키로부터 동적으로 추론한다.
 · upsert_many()로 배치 삽입/갱신.
 · replicate_from()으로 원격에서 받은 직렬화 데이터 그대로 저장.
 """
 
 import json
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -16,13 +18,30 @@ from typing import Any
 
 
 class Store:
-    def __init__(self, db_path: str) -> None:
-        self._path = Path(db_path)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, base_dir: str) -> None:
+        self._base_dir = Path(base_dir)
+        self._base_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conns: dict[str, sqlite3.Connection] = {}
+
+    def _normalize_table(self, table: str) -> str:
+        normalized = re.sub(r"[^A-Za-z0-9_]", "_", table).strip("_")
+        if not normalized:
+            raise ValueError(f"invalid table name: {table}")
+        return normalized.lower()
+
+    def _get_conn(self, table: str) -> sqlite3.Connection:
+        key = self._normalize_table(table)
+        conn = self._conns.get(key)
+        if conn is not None:
+            return conn
+
+        db_path = self._base_dir / f"{key}.db"
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        self._conns[key] = conn
+        return conn
 
     # ── 내부 ────────────────────────────────────────────────────────
     def _ensure_table(self, cursor: sqlite3.Cursor, table: str, row: dict) -> None:
@@ -63,9 +82,10 @@ class Store:
         if not rows:
             return 0
         with self._lock:
-            cur = self._conn.cursor()
+            conn = self._get_conn(table)
+            cur = conn.cursor()
             self._upsert_rows(cur, table, rows)
-            self._conn.commit()
+            conn.commit()
             return cur.rowcount
 
     def replicate_from(self, payload: bytes) -> None:
@@ -86,12 +106,21 @@ class Store:
             payload.update(metadata)
         return json.dumps(payload, ensure_ascii=False, default=str).encode()
 
-    def query(self, sql: str, params: tuple = ()) -> list[dict]:
+    def query(self, sql: str, params: tuple = (), table: str | None = None) -> list[dict]:
         with self._lock:
-            cur = self._conn.execute(sql, params)
+            if table is None:
+                if len(self._conns) == 1:
+                    conn = next(iter(self._conns.values()))
+                else:
+                    raise ValueError("table is required when multiple table DB files exist")
+            else:
+                conn = self._get_conn(table)
+            cur = conn.execute(sql, params)
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def close(self) -> None:
         with self._lock:
-            self._conn.close()
+            for conn in self._conns.values():
+                conn.close()
+            self._conns.clear()

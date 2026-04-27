@@ -24,7 +24,7 @@ pip install -r requirements.txt
 - node_id, weight: 리더 선출 기준
 - failover: heartbeat 포트/주기/피어
 - replication: Active → Standby 복제 포트/피어
-- sqlite: 로컬 DB 경로
+- sqlite: 로컬 DB 디렉토리 경로 (테이블별 .db 파일 생성)
 - collectors: oracle/splunk 수집 설정
 
 예시:
@@ -44,7 +44,7 @@ logging:
   log_base: logs/app_node1
 
 sqlite:
-  path: data/node1.db
+  path: data/app1
 
 replication:
   port: 5556
@@ -90,6 +90,11 @@ collectors:
 1) Active 로컬 SQLite 저장
 2) Standby로 복제 전송
 3) Standby SQLite 저장
+
+SQLite 저장 구조:
+- `sqlite.path`를 폴더로 지정하면, 테이블마다 별도 파일이 생성됩니다.
+- 예: `sqlite.path: data/app1` 이고 테이블이 `inventory`, `orders`면
+  `data/app1/inventory.db`, `data/app1/orders.db`가 생성됩니다.
 
 ## 3노드 로컬 테스트
 

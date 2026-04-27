@@ -1,66 +1,34 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import threading
 import time
 
 import zmq
 
-from config_loader import load_config
+from failover import Failovernode
 from logger import Logger
 
 
-class FailoverNode:
+class FailoverNode_zmq(Failovernode):
     def __init__(self, config_file: str, logger: Logger | None = None):
-        self.config = load_config(config_file)
+        super().__init__(config_file=config_file, logger=logger)
         failover_cfg = self.config.get("failover", {})
-        logging_cfg = self.config.get("logging", {})
-
-        self.node_id = self.config["node_id"]
-        self.weight = self.config["weight"]
         # Backward compatibility:
         # - old flat keys: peers/port/heartbeat_interval/log_base
         # - new grouped keys: failover.*, logging.log_base
         self.peers = failover_cfg.get("peers", self.config.get("peers", []))
         self.port = failover_cfg.get("port", self.config.get("port", 5555))
-        self.heartbeat_interval = failover_cfg.get(
-            "heartbeat_interval",
-            self.config.get("heartbeat_interval", 2),
-        )
-        self.fail_after_missed_heartbeats = failover_cfg.get("fail_after_missed_heartbeats", 2)
-        self.status_interval = failover_cfg.get("status_interval", 5)
-        self.log_base = logging_cfg.get("log_base", self.config.get("log_base", "logs/failover"))
-
-        self.isActive = False
-        self.peers_state = {}
         self.ctx = zmq.Context()
-        self.running = True
-        self._stopping = False
-        self._stop_lock = threading.Lock()
-        self._threads: list[threading.Thread] = []
         self._peer_reachable: dict[str, bool] = {}
-        self._owns_logger = logger is None
-        self.logger = logger or Logger(
-            name=f"failover.{self.node_id}",
-            log_base=self.log_base,
-        )
 
-    def start(self) -> None:
-        """Start heartbeat server and client threads."""
-        self._threads = [
+    def _build_threads(self) -> list[threading.Thread]:
+        return [
             threading.Thread(target=self._heartbeat_server, daemon=True, name="hb-server"),
             threading.Thread(target=self._heartbeat_sender, daemon=True, name="hb-sender"),
             threading.Thread(target=self._leader_election, daemon=True, name="leader-election"),
             threading.Thread(target=self._status_reporter, daemon=True, name="status-reporter"),
         ]
-        for th in self._threads:
-            th.start()
-
-        self.logger.info("[%s] Failover node started with weight=%s", self.node_id, self.weight)
-
-        try:
-            while self.running:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            self.stop()
 
     def _heartbeat_server(self) -> None:
         """Receive heartbeats and control commands from peers."""
@@ -166,62 +134,19 @@ class FailoverNode:
                 elif state["weight"] == max_weight and peer_id > self.node_id:
                     is_leader = False
 
-            old_status = self.isActive
-            self.isActive = is_leader
-
-            if self.isActive != old_status:
-                status = "ACTIVE" if self.isActive else "STANDBY"
-                self.logger.info(
-                    "[%s] Status changed to %s (weight=%s)",
-                    self.node_id,
-                    status,
-                    self.weight,
-                )
+            self._set_active(is_leader)
 
             time.sleep(self.heartbeat_interval)
 
-    def _status_reporter(self) -> None:
-        """Log current role and peer weights periodically."""
-        while self.running:
-            role = "ACTIVE" if self.isActive else "STANDBY"
-            peer_weights = ", ".join(
-                f"{peer_id}:{state['weight']}"
-                for peer_id, state in sorted(self.peers_state.items())
-            )
-            if not peer_weights:
-                peer_weights = "none"
+    def _format_peer_status(self) -> str:
+        peer_status = ", ".join(
+            f"{peer_id}:{state['weight']}"
+            for peer_id, state in sorted(self.peers_state.items())
+        )
+        return peer_status or "none"
 
-            self.logger.info(
-                "[%s] role=%s self_weight=%s peer_weights={%s}",
-                self.node_id,
-                role,
-                self.weight,
-                peer_weights,
-            )
-
-            for _ in range(self.status_interval):
-                if not self.running:
-                    break
-                time.sleep(1)
-
-    def stop(self) -> None:
-        with self._stop_lock:
-            if self._stopping:
-                return
-            self._stopping = True
-            self.running = False
-
-        current = threading.current_thread()
-        for th in self._threads:
-            if th is current:
-                continue
-            if th.is_alive():
-                th.join(timeout=1.0)
-
+    def _cleanup(self) -> None:
         self.ctx.term()
-        self.logger.info("[%s] Stopped", self.node_id)
-        if self._owns_logger:
-            self.logger.stop()
 
 
 def send_stop(endpoint: str, timeout_ms: int = 3000) -> dict:
@@ -240,5 +165,8 @@ def send_stop(endpoint: str, timeout_ms: int = 3000) -> dict:
 
 
 if __name__ == "__main__":
-    node = FailoverNode("config.json")
+    node = FailoverNode_zmq("config.json")
     node.start()
+
+
+FailoverNode = FailoverNode_zmq

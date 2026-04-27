@@ -14,7 +14,7 @@ logging:
   log_base: logs/app_node1
 
 sqlite:
-  path: data/node1.db
+  path: data/app1
 
 replication:
   port: 5556
