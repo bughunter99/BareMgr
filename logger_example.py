@@ -176,8 +176,13 @@ def demo_exception_logging() -> None:
 # 메인
 # ══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    # macOS/Windows에서 spawn 방식 사용 시 필요 (Linux fork도 동작)
-    multiprocessing.set_start_method("fork", force=True)
+    # Windows는 fork를 지원하지 않으므로 플랫폼 기본 방식 사용.
+    # 필요 시에만 start method를 설정한다.
+    multiprocessing.freeze_support()
+    if multiprocessing.get_start_method(allow_none=True) is None:
+        methods = multiprocessing.get_all_start_methods()
+        preferred = "fork" if "fork" in methods else "spawn"
+        multiprocessing.set_start_method(preferred)
 
     demo_multithreading()
     demo_multiprocessing()
