@@ -36,7 +36,21 @@ pip install pyzmq
 
 ```bash
 workon v1
-python failover.py
+python failover_zmq.py
+```
+
+## 외부 스크립트로 Graceful Stop
+
+`failover_zmq.py`의 수신 포트는 제어 메시지 `{"type": "stop"}`를 받으면 정상 종료합니다.
+
+```bash
+python failover_zmq_stop.py 127.0.0.1:5555
+```
+
+또는 예제 스크립트:
+
+```bash
+python failover_zmq_stop_example.py 127.0.0.1:5555
 ```
 
 ## 동작 원리
@@ -49,11 +63,18 @@ python failover.py
 ## 사용 예시
 
 ```python
-from failover import FailoverNode
+from failover_zmq import FailoverNode
 
 node = FailoverNode('config.json')
 node.start()
 
 # isActive 속성으로 현재 상태 확인
 print(f"Active: {node.isActive}")
+```
+
+```python
+from failover_zmq import send_stop
+
+response = send_stop("127.0.0.1:5555")
+print(response)  # {'status': 'stopping', 'node_id': 'node1'}
 ```

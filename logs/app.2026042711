@@ -79,3 +79,84 @@ Traceback (most recent call last):
     _ = data["missing_key"]
         ~~~~^^^^^^^^^^^^^^^
 KeyError: 'missing_key'
+2026-04-27 11:10:37,577 [ERROR   ] [PID:31352 TID:509659640192] thread_demo - [Thread Worker 0] iteration=0
+2026-04-27 11:10:37,579 [DEBUG   ] [PID:31352 TID:509642731904] thread_demo - [Thread Worker 1] iteration=0
+2026-04-27 11:10:37,580 [ERROR   ] [PID:31352 TID:509634277760] thread_demo - [Thread Worker 2] iteration=0
+2026-04-27 11:10:37,581 [DEBUG   ] [PID:31352 TID:509423382912] thread_demo - [Thread Worker 3] iteration=0
+2026-04-27 11:10:37,584 [ERROR   ] [PID:31352 TID:509414928768] thread_demo - [Thread Worker 4] iteration=0
+2026-04-27 11:10:37,585 [ERROR   ] [PID:31352 TID:509406474624] thread_demo - [Thread Worker 5] iteration=0
+2026-04-27 11:10:37,592 [INFO    ] [PID:31352 TID:509659640192] thread_demo - [Thread Worker 0] iteration=1
+2026-04-27 11:10:37,611 [ERROR   ] [PID:31352 TID:509423382912] thread_demo - [Thread Worker 3] iteration=1
+2026-04-27 11:10:37,616 [DEBUG   ] [PID:31352 TID:509634277760] thread_demo - [Thread Worker 2] iteration=1
+2026-04-27 11:10:37,621 [INFO    ] [PID:31352 TID:509642731904] thread_demo - [Thread Worker 1] iteration=1
+2026-04-27 11:10:37,622 [WARNING ] [PID:31352 TID:509659640192] thread_demo - [Thread Worker 0] iteration=2
+2026-04-27 11:10:37,624 [DEBUG   ] [PID:31352 TID:509406474624] thread_demo - [Thread Worker 5] iteration=1
+2026-04-27 11:10:37,627 [DEBUG   ] [PID:31352 TID:509423382912] thread_demo - [Thread Worker 3] iteration=2
+2026-04-27 11:10:37,633 [INFO    ] [PID:31352 TID:509414928768] thread_demo - [Thread Worker 4] iteration=1
+2026-04-27 11:10:37,635 [WARNING ] [PID:31352 TID:509406474624] thread_demo - [Thread Worker 5] iteration=2
+2026-04-27 11:10:37,640 [ERROR   ] [PID:31352 TID:509642731904] thread_demo - [Thread Worker 1] iteration=2
+2026-04-27 11:10:37,647 [INFO    ] [PID:31352 TID:509659640192] thread_demo - [Thread Worker 0] iteration=3
+2026-04-27 11:10:37,649 [WARNING ] [PID:31352 TID:509423382912] thread_demo - [Thread Worker 3] iteration=3
+2026-04-27 11:10:37,651 [DEBUG   ] [PID:31352 TID:509642731904] thread_demo - [Thread Worker 1] iteration=3
+2026-04-27 11:10:37,652 [ERROR   ] [PID:31352 TID:509634277760] thread_demo - [Thread Worker 2] iteration=2
+2026-04-27 11:10:37,663 [ERROR   ] [PID:31352 TID:509414928768] thread_demo - [Thread Worker 4] iteration=2
+2026-04-27 11:10:37,667 [DEBUG   ] [PID:31352 TID:509406474624] thread_demo - [Thread Worker 5] iteration=3
+2026-04-27 11:10:37,668 [INFO    ] [PID:31352 TID:509642731904] thread_demo - [Thread Worker 1] iteration=4
+2026-04-27 11:10:37,670 [DEBUG   ] [PID:31352 TID:509423382912] thread_demo - [Thread Worker 3] iteration=4
+2026-04-27 11:10:37,671 [WARNING ] [PID:31352 TID:509659640192] thread_demo - [Thread Worker 0] iteration=4
+2026-04-27 11:10:37,685 [DEBUG   ] [PID:31352 TID:509634277760] thread_demo - [Thread Worker 2] iteration=3
+2026-04-27 11:10:37,699 [ERROR   ] [PID:31352 TID:509414928768] thread_demo - [Thread Worker 4] iteration=3
+2026-04-27 11:10:37,703 [DEBUG   ] [PID:31352 TID:509406474624] thread_demo - [Thread Worker 5] iteration=4
+2026-04-27 11:10:37,717 [ERROR   ] [PID:31352 TID:509414928768] thread_demo - [Thread Worker 4] iteration=4
+2026-04-27 11:10:37,732 [ERROR   ] [PID:31352 TID:509634277760] thread_demo - [Thread Worker 2] iteration=4
+2026-04-27 11:10:37,753 [INFO    ] [PID:31352 TID:509681901600] thread_demo - 모든 스레드 완료
+2026-04-27 11:10:37,859 [INFO    ] [PID:31366 TID:509681901600] mp_demo - [Process Worker 1] 작업 시작 (PID=31366)
+2026-04-27 11:10:37,859 [INFO    ] [PID:31368 TID:509681901600] mp_demo - [Process Worker 2] 작업 시작 (PID=31368)
+2026-04-27 11:10:37,859 [INFO    ] [PID:31388 TID:509681901600] mp_demo - [Process Worker 3] 작업 시작 (PID=31388)
+2026-04-27 11:10:37,859 [INFO    ] [PID:31364 TID:509681901600] mp_demo - [Process Worker 0] 작업 시작 (PID=31364)
+2026-04-27 11:10:37,922 [DEBUG   ] [PID:31364 TID:509681901600] mp_demo - [Process Worker 0] 결과=0
+2026-04-27 11:10:37,923 [INFO    ] [PID:31364 TID:509681901600] mp_demo - [Process Worker 4] 작업 시작 (PID=31364)
+2026-04-27 11:10:37,938 [DEBUG   ] [PID:31368 TID:509681901600] mp_demo - [Process Worker 2] 결과=4
+2026-04-27 11:10:37,939 [INFO    ] [PID:31368 TID:509681901600] mp_demo - [Process Worker 5] 작업 시작 (PID=31368)
+2026-04-27 11:10:37,951 [DEBUG   ] [PID:31388 TID:509681901600] mp_demo - [Process Worker 3] 결과=9
+2026-04-27 11:10:37,952 [INFO    ] [PID:31388 TID:509681901600] mp_demo - [Process Worker 6] 작업 시작 (PID=31388)
+2026-04-27 11:10:38,022 [DEBUG   ] [PID:31388 TID:509681901600] mp_demo - [Process Worker 6] 결과=36
+2026-04-27 11:10:38,023 [INFO    ] [PID:31388 TID:509681901600] mp_demo - [Process Worker 7] 작업 시작 (PID=31388)
+2026-04-27 11:10:38,030 [DEBUG   ] [PID:31366 TID:509681901600] mp_demo - [Process Worker 1] 결과=1
+2026-04-27 11:10:38,032 [INFO    ] [PID:31366 TID:509681901600] mp_demo - [Process Worker 8] 작업 시작 (PID=31366)
+2026-04-27 11:10:38,087 [DEBUG   ] [PID:31388 TID:509681901600] mp_demo - [Process Worker 7] 결과=49
+2026-04-27 11:10:38,088 [INFO    ] [PID:31388 TID:509681901600] mp_demo - [Process Worker 9] 작업 시작 (PID=31388)
+2026-04-27 11:10:38,106 [DEBUG   ] [PID:31368 TID:509681901600] mp_demo - [Process Worker 5] 결과=25
+2026-04-27 11:10:38,109 [INFO    ] [PID:31368 TID:509681901600] mp_demo - [Process Worker 10] 작업 시작 (PID=31368)
+2026-04-27 11:10:38,116 [DEBUG   ] [PID:31364 TID:509681901600] mp_demo - [Process Worker 4] 결과=16
+2026-04-27 11:10:38,118 [INFO    ] [PID:31364 TID:509681901600] mp_demo - [Process Worker 11] 작업 시작 (PID=31364)
+2026-04-27 11:10:38,148 [DEBUG   ] [PID:31388 TID:509681901600] mp_demo - [Process Worker 9] 결과=81
+2026-04-27 11:10:38,224 [DEBUG   ] [PID:31366 TID:509681901600] mp_demo - [Process Worker 8] 결과=64
+2026-04-27 11:10:38,283 [DEBUG   ] [PID:31368 TID:509681901600] mp_demo - [Process Worker 10] 결과=100
+2026-04-27 11:10:38,312 [DEBUG   ] [PID:31364 TID:509681901600] mp_demo - [Process Worker 11] 결과=121
+2026-04-27 11:10:38,327 [INFO    ] [PID:31352 TID:509681901600] mp_demo - 모든 프로세스 완료. 결과 합계=506
+2026-04-27 11:10:38,363 [INFO    ] [PID:31407 TID:509668094336] mixed -   [Process 0 / Thread 0] 실행 중
+2026-04-27 11:10:38,364 [INFO    ] [PID:31408 TID:509668094336] mixed -   [Process 1 / Thread 0] 실행 중
+2026-04-27 11:10:38,364 [INFO    ] [PID:31407 TID:509651186048] mixed -   [Process 0 / Thread 1] 실행 중
+2026-04-27 11:10:38,365 [INFO    ] [PID:31408 TID:509651186048] mixed -   [Process 1 / Thread 1] 실행 중
+2026-04-27 11:10:38,365 [INFO    ] [PID:31408 TID:509414928768] mixed -   [Process 1 / Thread 2] 실행 중
+2026-04-27 11:10:38,365 [INFO    ] [PID:31407 TID:509414928768] mixed -   [Process 0 / Thread 2] 실행 중
+2026-04-27 11:10:38,365 [INFO    ] [PID:31412 TID:509668094336] mixed -   [Process 2 / Thread 0] 실행 중
+2026-04-27 11:10:38,366 [INFO    ] [PID:31412 TID:509651186048] mixed -   [Process 2 / Thread 1] 실행 중
+2026-04-27 11:10:38,367 [INFO    ] [PID:31412 TID:509414928768] mixed -   [Process 2 / Thread 2] 실행 중
+2026-04-27 11:10:38,398 [INFO    ] [PID:31412 TID:509681901600] mixed - [Process 2] 내부 스레드 모두 완료
+2026-04-27 11:10:38,407 [INFO    ] [PID:31407 TID:509681901600] mixed - [Process 0] 내부 스레드 모두 완료
+2026-04-27 11:10:38,407 [INFO    ] [PID:31408 TID:509681901600] mixed - [Process 1] 내부 스레드 모두 완료
+2026-04-27 11:10:38,411 [INFO    ] [PID:31352 TID:509681901600] mixed - 예제 3 완료
+2026-04-27 11:10:38,438 [ERROR   ] [PID:31352 TID:509681901600] exc_demo - 0으로 나누기 에러 발생!
+Traceback (most recent call last):
+  File "/storage/self/primary/Download/workspace/BareMgr/logger_example.py", line 161, in demo_exception_logging
+    _ = 10 / 0
+        ~~~^~~
+ZeroDivisionError: division by zero
+2026-04-27 11:10:38,449 [ERROR   ] [PID:31352 TID:509681901600] exc_demo - 존재하지 않는 키 접근!
+Traceback (most recent call last):
+  File "/storage/self/primary/Download/workspace/BareMgr/logger_example.py", line 167, in demo_exception_logging
+    _ = data["missing_key"]
+        ~~~~^^^^^^^^^^^^^^^
+KeyError: 'missing_key'

@@ -1,0 +1,50 @@
+node_id: node3
+weight: 80
+
+failover:
+  port: 5559
+  heartbeat_interval: 2
+  peers:
+    - 127.0.0.1:5555
+    - 127.0.0.1:5557
+
+logging:
+  log_base: logs/app_node3
+
+sqlite:
+  path: data/node3.db
+
+replication:
+  port: 5560
+  peers:
+    - 127.0.0.1:5556
+    - 127.0.0.1:5558
+
+collectors:
+  oracle:
+    enabled: false
+    dsn: user/password@192.168.1.100:1521/ORCL
+    interval_sec: 60
+    jobs:
+      - name: inventory
+        sql: SELECT id, name, qty, updated_at FROM inventory WHERE updated_at > :last_ts
+        table: inventory
+      - name: orders
+        sql: SELECT order_id, status, amount, created_at FROM orders WHERE created_at > :last_ts
+        table: orders
+
+  splunk:
+    enabled: false
+    host: splunk.internal
+    port: 8089
+    username: admin
+    password: changeme
+    scheme: https
+    interval_sec: 120
+    jobs:
+      - name: error_events
+        query: search index=main level=ERROR earliest=-2m latest=now | table _time, host, message
+        table: splunk_errors
+      - name: access_logs
+        query: search index=access earliest=-2m latest=now | table _time, src_ip, uri, status
+        table: splunk_access

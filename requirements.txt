@@ -1,2 +1,4 @@
-zmq
 pyzmq
+cx_Oracle
+splunk-sdk
+pyyaml
