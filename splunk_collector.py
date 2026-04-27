@@ -116,46 +116,48 @@ class SplunkCollector(BaseCollector):
         job.cancel()
         return rows
 
-    def collect(self) -> list[tuple[str, list[dict]]]:
+    def collect(self) -> list[tuple[str, list[dict], str]]:
         if self._test_mode:
             return self._collect_test_rows()
 
         service = self._get_service()
-        collected: list[tuple[str, list[dict]]] = []
+        collected: list[tuple[str, list[dict], str]] = []
 
         for job in self._jobs:
             name: str = job["name"]
             query: str = job["query"]
             table: str = job["table"]
+            jid = self.logger.new_jid(prefix="SPL")
 
-            try:
-                started_at = time.perf_counter()
-                rows = self._run_search(service, query, name)
-                elapsed = time.perf_counter() - started_at
-                if rows:
-                    collected.append((table, rows))
-                    self.logger.info(
-                        "[SplunkCollector] ACTIVE selected job=%s table=%s rows=%d elapsed=%.3fs",
-                        name,
-                        table,
-                        len(rows),
-                        elapsed,
-                    )
-                else:
-                    self.logger.info(
-                        "[SplunkCollector] ACTIVE selected job=%s table=%s rows=0 elapsed=%.3fs",
-                        name,
-                        table,
-                        elapsed,
-                    )
-            except Exception:
-                self.logger.exception("[SplunkCollector] job=%s error", name)
-                self._close_service()  # 재연결 유도
-                raise
+            with self.logger.job_context(jid=jid, prefix="SPL"):
+                try:
+                    started_at = time.perf_counter()
+                    rows = self._run_search(service, query, name)
+                    elapsed = time.perf_counter() - started_at
+                    if rows:
+                        collected.append((table, rows, jid))
+                        self.logger.info(
+                            "[SplunkCollector] ACTIVE selected job=%s table=%s rows=%d elapsed=%.3fs",
+                            name,
+                            table,
+                            len(rows),
+                            elapsed,
+                        )
+                    else:
+                        self.logger.info(
+                            "[SplunkCollector] ACTIVE selected job=%s table=%s rows=0 elapsed=%.3fs",
+                            name,
+                            table,
+                            elapsed,
+                        )
+                except Exception:
+                    self.logger.exception("[SplunkCollector] job=%s error", name)
+                    self._close_service()
+                    raise
 
         return collected
 
-    def _collect_test_rows(self) -> list[tuple[str, list[dict]]]:
+    def _collect_test_rows(self) -> list[tuple[str, list[dict], str]]:
         if self._test_emit_once and self._test_emitted:
             self.logger.debug("[SplunkCollector:test] already emitted, skip")
             return []
@@ -165,36 +167,38 @@ class SplunkCollector(BaseCollector):
         batch_no = self._test_batch_no
         self._test_batch_no += 1
 
-        results: list[tuple[str, list[dict]]] = []
+        results: list[tuple[str, list[dict], str]] = []
         for idx, job in enumerate(jobs):
             table = job.get("table", job.get("name", f"splunk_test_{idx}"))
             name = job.get("name", f"job_{idx}")
             rows_per_job = max(1, int(job.get("test_rows", self._test_rows)))
-            started_at = time.perf_counter()
-            rows = []
-            for i in range(rows_per_job):
-                rows.append(
-                    {
-                        "event_id": f"{name}-batch{batch_no}-{i}",
-                        "job": name,
-                        "batch_no": str(batch_no),
-                        "host": f"host-{i % 16}",
-                        "message": f"synthetic splunk event {i}",
-                        "severity": ["INFO", "WARN", "ERROR"][i % 3],
-                        "updated_at": now,
-                        "source": "splunk_test_mode",
-                    }
+            jid = self.logger.new_jid(prefix="SPL")
+            with self.logger.job_context(jid=jid, prefix="SPL"):
+                started_at = time.perf_counter()
+                rows = []
+                for i in range(rows_per_job):
+                    rows.append(
+                        {
+                            "event_id": f"{name}-batch{batch_no}-{i}",
+                            "job": name,
+                            "batch_no": str(batch_no),
+                            "host": f"host-{i % 16}",
+                            "message": f"synthetic splunk event {i}",
+                            "severity": ["INFO", "WARN", "ERROR"][i % 3],
+                            "updated_at": now,
+                            "source": "splunk_test_mode",
+                        }
+                    )
+                results.append((table, rows, jid))
+                elapsed = time.perf_counter() - started_at
+                self.logger.info(
+                    "[SplunkCollector:test] ACTIVE selected job=%s table=%s rows=%d batch=%d elapsed=%.3fs",
+                    name,
+                    table,
+                    len(rows),
+                    batch_no,
+                    elapsed,
                 )
-            results.append((table, rows))
-            elapsed = time.perf_counter() - started_at
-            self.logger.info(
-                "[SplunkCollector:test] ACTIVE selected job=%s table=%s rows=%d batch=%d elapsed=%.3fs",
-                name,
-                table,
-                len(rows),
-                batch_no,
-                elapsed,
-            )
 
         self._test_emitted = True
         return results

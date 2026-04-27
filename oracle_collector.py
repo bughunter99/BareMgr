@@ -82,11 +82,11 @@ class OracleCollector(BaseCollector):
             self._conn = None
 
     # ── 수집 ────────────────────────────────────────────────────────
-    def collect(self) -> list[tuple[str, list[dict]]]:
+    def collect(self) -> list[tuple[str, list[dict], str]]:
         if self._test_mode:
             return self._collect_test_rows()
 
-        results: list[tuple[str, list[dict]]] = []
+        results: list[tuple[str, list[dict], str]] = []
         conn = self._get_conn()
         cursor = conn.cursor()
 
@@ -95,42 +95,43 @@ class OracleCollector(BaseCollector):
             sql: str = job["sql"]
             table: str = job["table"]
             last_ts: str = self._last_ts[name]
+            jid = self.logger.new_jid(prefix="ORA")
 
-            try:
-                started_at = time.perf_counter()
-                cursor.execute(sql, {"last_ts": last_ts})
-                cols = [d[0].lower() for d in cursor.description]
-                rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
-                elapsed = time.perf_counter() - started_at
-                if rows:
-                    results.append((table, rows))
-                    # 수집 시각 갱신
-                    self._last_ts[name] = datetime.now(timezone.utc).strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    )
-                    self.logger.info(
-                        "[OracleCollector] ACTIVE selected job=%s table=%s rows=%d elapsed=%.3fs",
-                        name,
-                        table,
-                        len(rows),
-                        elapsed,
-                    )
-                else:
-                    self.logger.info(
-                        "[OracleCollector] ACTIVE selected job=%s table=%s rows=0 elapsed=%.3fs",
-                        name,
-                        table,
-                        elapsed,
-                    )
-            except Exception:
-                self.logger.exception("[OracleCollector] job=%s query error", name)
-                self._close_conn()  # 재연결 유도
-                raise
+            with self.logger.job_context(jid=jid, prefix="ORA"):
+                try:
+                    started_at = time.perf_counter()
+                    cursor.execute(sql, {"last_ts": last_ts})
+                    cols = [d[0].lower() for d in cursor.description]
+                    rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
+                    elapsed = time.perf_counter() - started_at
+                    if rows:
+                        results.append((table, rows, jid))
+                        self._last_ts[name] = datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+                        self.logger.info(
+                            "[OracleCollector] ACTIVE selected job=%s table=%s rows=%d elapsed=%.3fs",
+                            name,
+                            table,
+                            len(rows),
+                            elapsed,
+                        )
+                    else:
+                        self.logger.info(
+                            "[OracleCollector] ACTIVE selected job=%s table=%s rows=0 elapsed=%.3fs",
+                            name,
+                            table,
+                            elapsed,
+                        )
+                except Exception:
+                    self.logger.exception("[OracleCollector] job=%s query error", name)
+                    self._close_conn()
+                    raise
 
         cursor.close()
         return results
 
-    def _collect_test_rows(self) -> list[tuple[str, list[dict]]]:
+    def _collect_test_rows(self) -> list[tuple[str, list[dict], str]]:
         """Oracle 없이 테스트할 때 임의 데이터(기본 5000건)를 생성한다."""
         if self._test_emit_once and self._test_emitted:
             self.logger.debug("[OracleCollector:test] already emitted, skip")
@@ -142,35 +143,37 @@ class OracleCollector(BaseCollector):
         batch_no = self._test_batch_no
         self._test_batch_no += 1
 
-        results: list[tuple[str, list[dict]]] = []
+        results: list[tuple[str, list[dict], str]] = []
         for idx, job in enumerate(jobs):
             table = job.get("table", job.get("name", f"oracle_test_{idx}"))
             name = job.get("name", f"job_{idx}")
             rows_per_job = max(1, int(job.get("test_rows", self._test_rows)))
-            started_at = time.perf_counter()
-            rows = []
-            for i in range(rows_per_job):
-                rows.append(
-                    {
-                        "id": f"{name}-batch{batch_no}-{i}",
-                        "job": name,
-                        "batch_no": str(batch_no),
-                        "payload": f"dummy-payload-{i}",
-                        "qty": (i * 7) % 1000,
-                        "updated_at": now,
-                        "source": "oracle_test_mode",
-                    }
+            jid = self.logger.new_jid(prefix="ORA")
+            with self.logger.job_context(jid=jid, prefix="ORA"):
+                started_at = time.perf_counter()
+                rows = []
+                for i in range(rows_per_job):
+                    rows.append(
+                        {
+                            "id": f"{name}-batch{batch_no}-{i}",
+                            "job": name,
+                            "batch_no": str(batch_no),
+                            "payload": f"dummy-payload-{i}",
+                            "qty": (i * 7) % 1000,
+                            "updated_at": now,
+                            "source": "oracle_test_mode",
+                        }
+                    )
+                results.append((table, rows, jid))
+                elapsed = time.perf_counter() - started_at
+                self.logger.info(
+                    "[OracleCollector:test] ACTIVE selected job=%s table=%s rows=%d batch=%d elapsed=%.3fs",
+                    name,
+                    table,
+                    len(rows),
+                    batch_no,
+                    elapsed,
                 )
-            results.append((table, rows))
-            elapsed = time.perf_counter() - started_at
-            self.logger.info(
-                "[OracleCollector:test] ACTIVE selected job=%s table=%s rows=%d batch=%d elapsed=%.3fs",
-                name,
-                table,
-                len(rows),
-                batch_no,
-                elapsed,
-            )
 
         self._test_emitted = True
         return results

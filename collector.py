@@ -48,7 +48,8 @@ class BaseCollector(ABC):
     @abstractmethod
     def collect(self) -> list[tuple[str, list[dict]]]:
         """
-        데이터를 가져와 [(table_name, rows), ...] 형태로 반환한다.
+        데이터를 가져와 [(table_name, rows), ...] 또는
+        [(table_name, rows, jid), ...] 형태로 반환한다.
         active 상태일 때만 호출된다.
         """
 
@@ -85,20 +86,26 @@ class BaseCollector(ABC):
             if self.is_active:
                 try:
                     results = self.collect()
-                    for table, rows in results:
+                    for item in results:
+                        if len(item) == 3:
+                            table, rows, jid = item
+                        else:
+                            table, rows = item
+                            jid = None
                         if rows:
-                            started_at = time.perf_counter()
-                            self.store.upsert_many(table, rows)
-                            elapsed = time.perf_counter() - started_at
-                            self.logger.info(
-                                "[Collector:%s] ACTIVE local insert done table=%s rows=%d elapsed=%.3fs",
-                                self.name,
-                                table,
-                                len(rows),
-                                elapsed,
-                            )
-                            if self.on_collect:
-                                self.on_collect(table, rows)
+                            with self.logger.job_context(jid=jid, prefix=self.name.upper()) as active_jid:
+                                started_at = time.perf_counter()
+                                self.store.upsert_many(table, rows)
+                                elapsed = time.perf_counter() - started_at
+                                self.logger.info(
+                                    "[Collector:%s] ACTIVE local insert done table=%s rows=%d elapsed=%.3fs",
+                                    self.name,
+                                    table,
+                                    len(rows),
+                                    elapsed,
+                                )
+                                if self.on_collect:
+                                    self.on_collect(table, rows)
                 except Exception:
                     self.logger.exception("[Collector:%s] collect error", self.name)
             else:

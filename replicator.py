@@ -194,22 +194,26 @@ class Replicator:
                 rows = data.get("rows", [])
                 chunk_index = int(data.get("chunk_index", 0)) + 1
                 chunk_count = int(data.get("chunk_count", 1))
-                self._logger.info(
-                    "[Replicator] STANDBY received table=%s rows=%d chunk=%d/%d",
-                    table,
-                    len(rows),
-                    chunk_index,
-                    chunk_count,
-                )
+                jid = self._logger.new_jid(prefix="REP")
+                data["_jid"] = jid
+                with self._logger.job_context(jid=jid, prefix="REP"):
+                    self._logger.info(
+                        "[Replicator] STANDBY received table=%s rows=%d chunk=%d/%d",
+                        table,
+                        len(rows),
+                        chunk_index,
+                        chunk_count,
+                    )
                 data["_received_elapsed"] = time.perf_counter() - recv_started
                 data["_enqueued_at"] = time.perf_counter()
                 self._sub_queue.put(data, timeout=1.0)
-                self._logger.info(
-                    "[Replicator] STANDBY enqueued table=%s rows=%d queue_depth=%d",
-                    table,
-                    len(rows),
-                    self._sub_queue.qsize(),
-                )
+                with self._logger.job_context(jid=jid, prefix="REP"):
+                    self._logger.info(
+                        "[Replicator] STANDBY enqueued table=%s rows=%d queue_depth=%d",
+                        table,
+                        len(rows),
+                        self._sub_queue.qsize(),
+                    )
             except queue.Full:
                 self._logger.warning("[Replicator] subscriber queue full, dropping payload")
             except zmq.Again:
@@ -236,21 +240,23 @@ class Replicator:
                 chunk_count = int(data.get("chunk_count", 1))
                 recv_elapsed = float(data.get("_received_elapsed", 0.0))
                 enqueued_at = float(data.get("_enqueued_at", time.perf_counter()))
+                jid = data.get("_jid")
                 queue_wait = time.perf_counter() - enqueued_at
-                store_started = time.perf_counter()
-                self._store.replicate_message(data)
-                store_elapsed = time.perf_counter() - store_started
-                self._logger.info(
-                    "[Replicator] STANDBY insert done table=%s rows=%d chunk=%d/%d recv_elapsed=%.3fs queue_wait=%.3fs store_elapsed=%.3fs queue_depth=%d",
-                    table,
-                    len(rows),
-                    chunk_index,
-                    chunk_count,
-                    recv_elapsed,
-                    queue_wait,
-                    store_elapsed,
-                    self._sub_queue.qsize(),
-                )
+                with self._logger.job_context(jid=jid, prefix="REP"):
+                    store_started = time.perf_counter()
+                    self._store.replicate_message(data)
+                    store_elapsed = time.perf_counter() - store_started
+                    self._logger.info(
+                        "[Replicator] STANDBY insert done table=%s rows=%d chunk=%d/%d recv_elapsed=%.3fs queue_wait=%.3fs store_elapsed=%.3fs queue_depth=%d",
+                        table,
+                        len(rows),
+                        chunk_index,
+                        chunk_count,
+                        recv_elapsed,
+                        queue_wait,
+                        store_elapsed,
+                        self._sub_queue.qsize(),
+                    )
             except Exception:
                 self._logger.exception("[Replicator] store error")
 

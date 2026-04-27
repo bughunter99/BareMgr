@@ -28,7 +28,10 @@ import logging.handlers
 import multiprocessing
 import threading
 import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
+from itertools import count
 from pathlib import Path
 
 
@@ -40,6 +43,23 @@ INFO     = logging.INFO
 WARNING  = logging.WARNING
 ERROR    = logging.ERROR
 CRITICAL = logging.CRITICAL
+
+
+_current_jid: ContextVar[str] = ContextVar("current_jid", default="-")
+_jid_counter = count(1)
+_jid_lock = threading.Lock()
+
+
+def _next_jid(prefix: str = "JOB") -> str:
+    with _jid_lock:
+        number = next(_jid_counter)
+    return f"{prefix}-{number:08d}"
+
+
+class _JobContextFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.jid = _current_jid.get()
+        return True
 
 
 # ══════════════════════════════════════════════
@@ -149,7 +169,7 @@ class Logger:
         level: int     = logging.DEBUG,
         fmt: str       = (
             "%(asctime)s [%(levelname)-8s] "
-            "[PID:%(process)d TID:%(thread)d] "
+            "[PID:%(process)d TID:%(thread)d JID:%(jid)s] "
             "%(name)s - %(message)s"
         ),
         encoding: str  = "utf-8",
@@ -197,6 +217,8 @@ class Logger:
         logger.setLevel(self.level)
         logger.propagate = False
         logger.handlers.clear()
+        logger.filters.clear()
+        logger.addFilter(_JobContextFilter())
         logger.addHandler(logging.handlers.QueueHandler(self._queue))
         return logger
 
@@ -217,6 +239,18 @@ class Logger:
 
     def __exit__(self, *_) -> None:
         self.stop()
+
+    @contextmanager
+    def job_context(self, jid: str | None = None, prefix: str = "JOB"):
+        job_id = jid or _next_jid(prefix)
+        token = _current_jid.set(job_id)
+        try:
+            yield job_id
+        finally:
+            _current_jid.reset(token)
+
+    def new_jid(self, prefix: str = "JOB") -> str:
+        return _next_jid(prefix)
 
     # ── 로깅 메서드 ──────────────────────────────
     def debug(self, msg: str, *args, **kwargs) -> None:
@@ -261,7 +295,9 @@ def init_worker_logger(
     """
     root = logging.getLogger(name)
     root.handlers.clear()
+    root.filters.clear()
     root.setLevel(level)
     root.propagate = False
+    root.addFilter(_JobContextFilter())
     root.addHandler(logging.handlers.QueueHandler(queue))
     return root
