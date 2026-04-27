@@ -10,6 +10,7 @@ oracle_collector.py — Oracle DB 주기 수집기.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import time
 from typing import TYPE_CHECKING
 
 from collector import BaseCollector
@@ -57,6 +58,7 @@ class OracleCollector(BaseCollector):
         self._test_rows: int = int(self._test_cfg.get("rows", 5000))
         self._test_emit_once: bool = self._test_cfg.get("emit_once", True)
         self._test_emitted: bool = False
+        self._test_batch_no: int = 0
         # 잡별 마지막 수집 시각 (UTC ISO8601)
         self._last_ts: dict[str, str] = {
             job["name"]: "1970-01-01 00:00:00" for job in self._jobs
@@ -95,9 +97,11 @@ class OracleCollector(BaseCollector):
             last_ts: str = self._last_ts[name]
 
             try:
+                started_at = time.perf_counter()
                 cursor.execute(sql, {"last_ts": last_ts})
                 cols = [d[0].lower() for d in cursor.description]
                 rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
+                elapsed = time.perf_counter() - started_at
                 if rows:
                     results.append((table, rows))
                     # 수집 시각 갱신
@@ -105,10 +109,19 @@ class OracleCollector(BaseCollector):
                         "%Y-%m-%d %H:%M:%S"
                     )
                     self.logger.info(
-                        "[OracleCollector] job=%s fetched %d rows", name, len(rows)
+                        "[OracleCollector] ACTIVE selected job=%s table=%s rows=%d elapsed=%.3fs",
+                        name,
+                        table,
+                        len(rows),
+                        elapsed,
                     )
                 else:
-                    self.logger.debug("[OracleCollector] job=%s no new rows", name)
+                    self.logger.info(
+                        "[OracleCollector] ACTIVE selected job=%s table=%s rows=0 elapsed=%.3fs",
+                        name,
+                        table,
+                        elapsed,
+                    )
             except Exception:
                 self.logger.exception("[OracleCollector] job=%s query error", name)
                 self._close_conn()  # 재연결 유도
@@ -124,22 +137,23 @@ class OracleCollector(BaseCollector):
             return []
 
         jobs = self._jobs or [{"name": "oracle_test", "table": "oracle_test_data"}]
-        total_rows = max(1, self._test_rows)
-        per_job = total_rows // len(jobs)
-        remainder = total_rows % len(jobs)
+        rows_per_job = max(1, self._test_rows)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        batch_no = self._test_batch_no
+        self._test_batch_no += 1
 
         results: list[tuple[str, list[dict]]] = []
         for idx, job in enumerate(jobs):
-            count = per_job + (1 if idx < remainder else 0)
             table = job.get("table", job.get("name", f"oracle_test_{idx}"))
             name = job.get("name", f"job_{idx}")
+            started_at = time.perf_counter()
             rows = []
-            for i in range(count):
+            for i in range(rows_per_job):
                 rows.append(
                     {
-                        "id": f"{name}-{i}",
+                        "id": f"{name}-batch{batch_no}-{i}",
                         "job": name,
+                        "batch_no": str(batch_no),
                         "payload": f"dummy-payload-{i}",
                         "qty": (i * 7) % 1000,
                         "updated_at": now,
@@ -147,7 +161,15 @@ class OracleCollector(BaseCollector):
                     }
                 )
             results.append((table, rows))
-            self.logger.info("[OracleCollector:test] job=%s generated %d rows", name, len(rows))
+            elapsed = time.perf_counter() - started_at
+            self.logger.info(
+                "[OracleCollector:test] ACTIVE selected job=%s table=%s rows=%d batch=%d elapsed=%.3fs",
+                name,
+                table,
+                len(rows),
+                batch_no,
+                elapsed,
+            )
 
         self._test_emitted = True
         return results

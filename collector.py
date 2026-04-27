@@ -87,10 +87,15 @@ class BaseCollector(ABC):
                     results = self.collect()
                     for table, rows in results:
                         if rows:
+                            started_at = time.perf_counter()
                             self.store.upsert_many(table, rows)
+                            elapsed = time.perf_counter() - started_at
                             self.logger.info(
-                                "[Collector:%s] saved %d rows → %s",
-                                self.name, len(rows), table,
+                                "[Collector:%s] ACTIVE local insert done table=%s rows=%d elapsed=%.3fs",
+                                self.name,
+                                table,
+                                len(rows),
+                                elapsed,
                             )
                             if self.on_collect:
                                 self.on_collect(table, rows)

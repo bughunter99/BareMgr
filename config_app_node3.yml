@@ -30,7 +30,7 @@ collectors:
     test:
       enabled: true
       rows: 5000
-      emit_once: true
+      emit_once: false
     jobs:
       - name: inventory
         sql: SELECT id, name, qty, updated_at FROM inventory WHERE updated_at > :last_ts

@@ -20,6 +20,7 @@ PUSH/PULL 패턴을 사용하는 이유
 
 import json
 import threading
+import time
 from typing import TYPE_CHECKING
 
 import zmq
@@ -84,10 +85,13 @@ class Replicator:
         if not rows:
             return
         payload = self._store.serialize(table, rows)
+        started_at = time.perf_counter()
+        peer_count = 0
         with self._pub_lock:
             for sock in self._pub_socks:
                 try:
                     sock.send(payload, flags=zmq.NOBLOCK)
+                    peer_count += 1
                 except zmq.Again:
                     self._logger.warning(
                         "[Replicator] send buffer full, dropped %d rows for %s",
@@ -95,6 +99,14 @@ class Replicator:
                     )
                 except zmq.error.ZMQError:
                     self._logger.exception("[Replicator] send error")
+        elapsed = time.perf_counter() - started_at
+        self._logger.info(
+            "[Replicator] ACTIVE published table=%s rows=%d peers=%d elapsed=%.3fs",
+            table,
+            len(rows),
+            peer_count,
+            elapsed,
+        )
 
     # ── Subscriber (Standby 역할) ────────────────────────────────────
     def start_subscriber(self) -> None:
@@ -126,12 +138,26 @@ class Replicator:
     def _recv_loop(self) -> None:
         while self._sub_running:
             try:
+                recv_started = time.perf_counter()
                 payload = self._sub_sock.recv()
-                self._store.replicate_from(payload)
                 data = json.loads(payload)
-                self._logger.debug(
-                    "[Replicator] replicated %d rows → %s",
-                    len(data.get("rows", [])), data.get("table"),
+                rows = data.get("rows", [])
+                table = data.get("table")
+                self._logger.info(
+                    "[Replicator] STANDBY received table=%s rows=%d",
+                    table,
+                    len(rows),
+                )
+                store_started = time.perf_counter()
+                self._store.replicate_from(payload)
+                store_elapsed = time.perf_counter() - store_started
+                total_elapsed = time.perf_counter() - recv_started
+                self._logger.info(
+                    "[Replicator] STANDBY insert done table=%s rows=%d store_elapsed=%.3fs total_elapsed=%.3fs",
+                    table,
+                    len(rows),
+                    store_elapsed,
+                    total_elapsed,
                 )
             except zmq.Again:
                 pass  # RCVTIMEO 만료 → 루프 계속
