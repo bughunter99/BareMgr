@@ -34,6 +34,7 @@ class FailoverNode:
         self._stopping = False
         self._stop_lock = threading.Lock()
         self._threads: list[threading.Thread] = []
+        self._peer_reachable: dict[str, bool] = {}
         self._owns_logger = logger is None
         self.logger = logger or Logger(
             name=f"failover.{self.node_id}",
@@ -103,34 +104,42 @@ class FailoverNode:
 
     def _heartbeat_sender(self) -> None:
         """Send heartbeats to peers."""
-        sock = self.ctx.socket(zmq.REQ)
-        sock.setsockopt(zmq.LINGER, 0)
-        sock.setsockopt(zmq.RCVTIMEO, 1000)
+        while self.running:
+            for peer_addr in self.peers:
+                endpoint = f"tcp://{peer_addr}"
+                sock = self.ctx.socket(zmq.REQ)
+                sock.setsockopt(zmq.LINGER, 0)
+                sock.setsockopt(zmq.RCVTIMEO, 1000)
+                sock.setsockopt(zmq.SNDTIMEO, 1000)
 
-        try:
-            while self.running:
-                for peer_addr in self.peers:
-                    endpoint = f"tcp://{peer_addr}"
-                    try:
-                        sock.connect(endpoint)
-                        sock.send_json(
-                            {
-                                "type": "heartbeat",
-                                "node_id": self.node_id,
-                                "weight": self.weight,
-                            }
+                try:
+                    sock.connect(endpoint)
+                    sock.send_json(
+                        {
+                            "type": "heartbeat",
+                            "node_id": self.node_id,
+                            "weight": self.weight,
+                        }
+                    )
+                    sock.recv_json()
+                    if self._peer_reachable.get(peer_addr) is not True:
+                        self.logger.info("[%s] heartbeat restored peer=%s", self.node_id, peer_addr)
+                    self._peer_reachable[peer_addr] = True
+                except zmq.error.ContextTerminated:
+                    sock.close(0)
+                    return
+                except Exception:
+                    if self._peer_reachable.get(peer_addr, True):
+                        self.logger.warning(
+                            "[%s] heartbeat failed peer=%s",
+                            self.node_id,
+                            peer_addr,
                         )
-                        sock.recv_json()
-                    except Exception:
-                        self.logger.debug("[%s] heartbeat failed to peer=%s", self.node_id, peer_addr)
-                    finally:
-                        try:
-                            sock.disconnect(endpoint)
-                        except Exception:
-                            pass
-                time.sleep(self.heartbeat_interval)
-        finally:
-            sock.close(0)
+                    self._peer_reachable[peer_addr] = False
+                finally:
+                    sock.close(0)
+
+            time.sleep(self.heartbeat_interval)
 
     def _leader_election(self) -> None:
         """Check if this node should be active."""
