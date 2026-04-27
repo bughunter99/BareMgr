@@ -25,6 +25,8 @@ class FailoverNode:
             "heartbeat_interval",
             self.config.get("heartbeat_interval", 2),
         )
+        self.fail_after_missed_heartbeats = failover_cfg.get("fail_after_missed_heartbeats", 2)
+        self.status_interval = failover_cfg.get("status_interval", 5)
         self.log_base = logging_cfg.get("log_base", self.config.get("log_base", "logs/failover"))
 
         self.isActive = False
@@ -47,6 +49,7 @@ class FailoverNode:
             threading.Thread(target=self._heartbeat_server, daemon=True, name="hb-server"),
             threading.Thread(target=self._heartbeat_sender, daemon=True, name="hb-sender"),
             threading.Thread(target=self._leader_election, daemon=True, name="leader-election"),
+            threading.Thread(target=self._status_reporter, daemon=True, name="status-reporter"),
         ]
         for th in self._threads:
             th.start()
@@ -148,7 +151,7 @@ class FailoverNode:
             stale = [
                 peer_id
                 for peer_id, state in self.peers_state.items()
-                if now - state["timestamp"] > self.heartbeat_interval * 3
+                if now - state["timestamp"] > self.heartbeat_interval * self.fail_after_missed_heartbeats
             ]
             for peer_id in stale:
                 del self.peers_state[peer_id]
@@ -176,6 +179,30 @@ class FailoverNode:
                 )
 
             time.sleep(self.heartbeat_interval)
+
+    def _status_reporter(self) -> None:
+        """Log current role and peer weights periodically."""
+        while self.running:
+            role = "ACTIVE" if self.isActive else "STANDBY"
+            peer_weights = ", ".join(
+                f"{peer_id}:{state['weight']}"
+                for peer_id, state in sorted(self.peers_state.items())
+            )
+            if not peer_weights:
+                peer_weights = "none"
+
+            self.logger.info(
+                "[%s] role=%s self_weight=%s peer_weights={%s}",
+                self.node_id,
+                role,
+                self.weight,
+                peer_weights,
+            )
+
+            for _ in range(self.status_interval):
+                if not self.running:
+                    break
+                time.sleep(1)
 
     def stop(self) -> None:
         with self._stop_lock:

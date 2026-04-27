@@ -3,7 +3,9 @@ weight: 90
 
 failover:
   port: 5557
-  heartbeat_interval: 2
+  heartbeat_interval: 1
+  fail_after_missed_heartbeats: 2
+  status_interval: 5
   peers:
     - 127.0.0.1:5555
     - 127.0.0.1:5559
