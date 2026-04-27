@@ -1,80 +1,120 @@
-# Weight-Based Active/Standby Failover System
+# Weight-Based Active/Standby Failover App
 
-Python 기반 다중 IP 가중치 기반 능동/대기 페일오버 시스템입니다.
+여러 서버(또는 로컬 다중 프로세스)에서 동일 코드를 실행하고,
+가중치 기반으로 1개 노드만 Active가 되어 수집 작업을 수행하는 시스템입니다.
+
+Active 노드는 수집한 데이터를 로컬 SQLite에 저장하고 Standby 노드에도 복제합니다.
 
 ## 설치
 
 ```bash
-workon v1
-pip install pyzmq
+pip install -r requirements.txt
 ```
 
-## 설정 (config.json)
+## 설정 파일 형식 (YAML)
 
-각 노드마다 config.json을 수정:
+앱은 JSON/YAML 모두 지원하지만, 기본은 YAML입니다.
 
-```json
-{
-  "node_id": "node1",
-  "weight": 100,
-  "port": 5555,
-  "heartbeat_interval": 2,
-  "peers": [
-    "192.168.1.10:5555",
-    "192.168.1.11:5555"
-  ]
-}
+샘플 파일:
+- config_app_node1.yml
+- config_app_node2.yml
+- config_app_node3.yml
+
+핵심 섹션:
+- node_id, weight: 리더 선출 기준
+- failover: heartbeat 포트/주기/피어
+- replication: Active → Standby 복제 포트/피어
+- sqlite: 로컬 DB 경로
+- collectors: oracle/splunk 수집 설정
+
+예시:
+
+```yaml
+node_id: node1
+weight: 100
+
+failover:
+  port: 5555
+  heartbeat_interval: 2
+  peers:
+    - 127.0.0.1:5557
+    - 127.0.0.1:5559
+
+logging:
+  log_base: logs/app_node1
+
+sqlite:
+  path: data/node1.db
+
+replication:
+  port: 5556
+  peers:
+    - 127.0.0.1:5558
+    - 127.0.0.1:5560
+
+collectors:
+  oracle:
+    enabled: true
+    interval_sec: 60
+    dsn: user/password@192.168.1.100:1521/ORCL
+    test:
+      enabled: true
+      rows: 5000
+      emit_once: true
+    jobs:
+      - name: inventory
+        sql: SELECT id, name, qty, updated_at FROM inventory WHERE updated_at > :last_ts
+        table: inventory
 ```
 
-- `node_id`: 노드 고유 ID
-- `weight`: 노드의 우선순위 (높을수록 active)
-- `port`: 수신 포트
-- `heartbeat_interval`: 하트비트 간격 (초)
-- `peers`: 다른 노드의 주소들
+## Oracle 없는 테스트 모드 (요청 반영)
 
-## 실행
+Oracle DB가 없을 때 아래 플래그를 켜면,
+OracleCollector가 실제 DB 대신 임의 list of dict 5000건을 생성해 수집한 것처럼 처리합니다.
+
+```yaml
+collectors:
+  oracle:
+    enabled: true
+    test:
+      enabled: true
+      rows: 5000
+      emit_once: true
+```
+
+- enabled: 테스트 모드 on/off
+- rows: 생성할 더미 row 수
+- emit_once: true면 1회만 생성, false면 주기마다 생성
+
+생성된 데이터는 일반 수집 데이터와 동일하게:
+1) Active 로컬 SQLite 저장
+2) Standby로 복제 전송
+3) Standby SQLite 저장
+
+## 3노드 로컬 테스트
+
+터미널 3개에서 각각 실행:
 
 ```bash
-workon v1
-python failover_zmq.py
+python main.py --config config_app_node1.yml
+python main.py --config config_app_node2.yml
+python main.py --config config_app_node3.yml
 ```
 
-## 외부 스크립트로 Graceful Stop
+가중치(node1=100, node2=90, node3=80) 기준으로 node1이 Active가 됩니다.
 
-`failover_zmq.py`의 수신 포트는 제어 메시지 `{"type": "stop"}`를 받으면 정상 종료합니다.
+## Active 종료 테스트
+
+Active 노드의 failover 포트로 stop 명령을 보내면 graceful shutdown됩니다.
 
 ```bash
 python failover_zmq_stop.py 127.0.0.1:5555
 ```
 
-또는 예제 스크립트:
+수초 내 Standby 노드 중 최고 가중치 노드가 Active로 승격됩니다.
+
+## 실행 진입점
 
 ```bash
-python failover_zmq_stop_example.py 127.0.0.1:5555
-```
-
-## 동작 원리
-
-1. 각 노드는 설정된 포트에서 하트비트를 수신
-2. 주기적으로 모든 피어에 자신의 가중치를 포함한 하트비트 전송
-3. 리더 선출: 가장 높은 가중치를 가진 노드가 `isActive=True`
-4. 가중치가 같으면 node_id 문자열 기준으로 선출
-
-## 사용 예시
-
-```python
-from failover_zmq import FailoverNode
-
-node = FailoverNode('config.json')
-node.start()
-
-# isActive 속성으로 현재 상태 확인
-print(f"Active: {node.isActive}")
-```
-
-```python
-from failover_zmq import send_stop
-
-response = send_stop("127.0.0.1:5555")
-print(response)  # {'status': 'stopping', 'node_id': 'node1'}
+python main.py --config config_app_node1.yml
 ```

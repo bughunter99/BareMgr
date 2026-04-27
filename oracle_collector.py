@@ -52,6 +52,11 @@ class OracleCollector(BaseCollector):
         )
         self._dsn: str = cfg["dsn"]
         self._jobs: list[dict] = cfg.get("jobs", [])
+        self._test_cfg: dict = cfg.get("test", {})
+        self._test_mode: bool = cfg.get("test_mode", False) or self._test_cfg.get("enabled", False)
+        self._test_rows: int = int(self._test_cfg.get("rows", 5000))
+        self._test_emit_once: bool = self._test_cfg.get("emit_once", True)
+        self._test_emitted: bool = False
         # 잡별 마지막 수집 시각 (UTC ISO8601)
         self._last_ts: dict[str, str] = {
             job["name"]: "1970-01-01 00:00:00" for job in self._jobs
@@ -76,6 +81,9 @@ class OracleCollector(BaseCollector):
 
     # ── 수집 ────────────────────────────────────────────────────────
     def collect(self) -> list[tuple[str, list[dict]]]:
+        if self._test_mode:
+            return self._collect_test_rows()
+
         results: list[tuple[str, list[dict]]] = []
         conn = self._get_conn()
         cursor = conn.cursor()
@@ -107,6 +115,41 @@ class OracleCollector(BaseCollector):
                 raise
 
         cursor.close()
+        return results
+
+    def _collect_test_rows(self) -> list[tuple[str, list[dict]]]:
+        """Oracle 없이 테스트할 때 임의 데이터(기본 5000건)를 생성한다."""
+        if self._test_emit_once and self._test_emitted:
+            self.logger.debug("[OracleCollector:test] already emitted, skip")
+            return []
+
+        jobs = self._jobs or [{"name": "oracle_test", "table": "oracle_test_data"}]
+        total_rows = max(1, self._test_rows)
+        per_job = total_rows // len(jobs)
+        remainder = total_rows % len(jobs)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+        results: list[tuple[str, list[dict]]] = []
+        for idx, job in enumerate(jobs):
+            count = per_job + (1 if idx < remainder else 0)
+            table = job.get("table", job.get("name", f"oracle_test_{idx}"))
+            name = job.get("name", f"job_{idx}")
+            rows = []
+            for i in range(count):
+                rows.append(
+                    {
+                        "id": f"{name}-{i}",
+                        "job": name,
+                        "payload": f"dummy-payload-{i}",
+                        "qty": (i * 7) % 1000,
+                        "updated_at": now,
+                        "source": "oracle_test_mode",
+                    }
+                )
+            results.append((table, rows))
+            self.logger.info("[OracleCollector:test] job=%s generated %d rows", name, len(rows))
+
+        self._test_emitted = True
         return results
 
     def stop(self) -> None:
