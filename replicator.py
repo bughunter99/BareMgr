@@ -19,6 +19,7 @@ PUSH/PULL 패턴을 사용하는 이유
 """
 
 import json
+import queue
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -46,6 +47,10 @@ class Replicator:
         """
         self._port: int = cfg["port"]
         self._peers: list[str] = cfg.get("peers", [])
+        self._chunk_rows: int = int(cfg.get("chunk_rows", 1000))
+        self._send_hwm: int = int(cfg.get("send_hwm", 200))
+        self._recv_hwm: int = int(cfg.get("recv_hwm", 200))
+        self._subscriber_queue_size: int = int(cfg.get("subscriber_queue_size", 200))
         self._store = store
         self._logger = logger
         self._ctx = zmq.Context()
@@ -57,7 +62,9 @@ class Replicator:
         # Subscriber (Standby)
         self._sub_sock: zmq.Socket | None = None
         self._sub_thread: threading.Thread | None = None
+        self._sub_store_thread: threading.Thread | None = None
         self._sub_running = False
+        self._sub_queue: queue.Queue[dict | None] = queue.Queue(maxsize=self._subscriber_queue_size)
 
     # ── Publisher (Active 역할) ──────────────────────────────────────
     def start_publisher(self) -> None:
@@ -68,10 +75,15 @@ class Replicator:
             for peer in self._peers:
                 sock = self._ctx.socket(zmq.PUSH)
                 sock.setsockopt(zmq.LINGER, 0)
-                sock.setsockopt(zmq.SNDHWM, 1000)
+                sock.setsockopt(zmq.SNDHWM, self._send_hwm)
                 sock.connect(f"tcp://{peer}")
                 self._pub_socks.append(sock)
-        self._logger.info("[Replicator] publisher started → peers=%s", self._peers)
+        self._logger.info(
+            "[Replicator] publisher started → peers=%s chunk_rows=%d send_hwm=%d",
+            self._peers,
+            self._chunk_rows,
+            self._send_hwm,
+        )
 
     def stop_publisher(self) -> None:
         with self._pub_lock:
@@ -84,27 +96,45 @@ class Replicator:
         """수집된 데이터를 모든 peer에 전송한다."""
         if not rows:
             return
-        payload = self._store.serialize(table, rows)
         started_at = time.perf_counter()
+        chunk_count = max(1, (len(rows) + self._chunk_rows - 1) // self._chunk_rows)
         peer_count = 0
+        sent_chunks = 0
         with self._pub_lock:
-            for sock in self._pub_socks:
-                try:
-                    sock.send(payload, flags=zmq.NOBLOCK)
-                    peer_count += 1
-                except zmq.Again:
-                    self._logger.warning(
-                        "[Replicator] send buffer full, dropped %d rows for %s",
-                        len(rows), table,
-                    )
-                except zmq.error.ZMQError:
-                    self._logger.exception("[Replicator] send error")
+            for chunk_index in range(chunk_count):
+                chunk_rows = rows[chunk_index * self._chunk_rows:(chunk_index + 1) * self._chunk_rows]
+                payload = self._store.serialize(
+                    table,
+                    chunk_rows,
+                    metadata={
+                        "chunk_index": chunk_index,
+                        "chunk_count": chunk_count,
+                        "row_count": len(chunk_rows),
+                    },
+                )
+                for sock in self._pub_socks:
+                    try:
+                        sock.send(payload, flags=zmq.NOBLOCK)
+                        peer_count = len(self._pub_socks)
+                        sent_chunks += 1
+                    except zmq.Again:
+                        self._logger.warning(
+                            "[Replicator] send buffer full, dropped table=%s chunk=%d/%d rows=%d",
+                            table,
+                            chunk_index + 1,
+                            chunk_count,
+                            len(chunk_rows),
+                        )
+                    except zmq.error.ZMQError:
+                        self._logger.exception("[Replicator] send error")
         elapsed = time.perf_counter() - started_at
         self._logger.info(
-            "[Replicator] ACTIVE published table=%s rows=%d peers=%d elapsed=%.3fs",
+            "[Replicator] ACTIVE published table=%s rows=%d chunks=%d peers=%d sent=%d elapsed=%.3fs",
             table,
             len(rows),
+            chunk_count,
             peer_count,
+            sent_chunks,
             elapsed,
         )
 
@@ -114,8 +144,10 @@ class Replicator:
         if self._sub_running:
             return
         self._sub_running = True
+        self._sub_queue = queue.Queue(maxsize=self._subscriber_queue_size)
         self._sub_sock = self._ctx.socket(zmq.PULL)
         self._sub_sock.setsockopt(zmq.LINGER, 0)
+        self._sub_sock.setsockopt(zmq.RCVHWM, self._recv_hwm)
         self._sub_sock.setsockopt(zmq.RCVTIMEO, 500)
         self._sub_sock.bind(f"tcp://*:{self._port}")
         self._sub_thread = threading.Thread(
@@ -123,13 +155,30 @@ class Replicator:
             daemon=True,
             name="replicator-sub",
         )
+        self._sub_store_thread = threading.Thread(
+            target=self._store_loop,
+            daemon=True,
+            name="replicator-store",
+        )
         self._sub_thread.start()
-        self._logger.info("[Replicator] subscriber started on port=%d", self._port)
+        self._sub_store_thread.start()
+        self._logger.info(
+            "[Replicator] subscriber started on port=%d recv_hwm=%d queue_size=%d",
+            self._port,
+            self._recv_hwm,
+            self._subscriber_queue_size,
+        )
 
     def stop_subscriber(self) -> None:
         self._sub_running = False
         if self._sub_thread and self._sub_thread.is_alive():
             self._sub_thread.join(timeout=2.0)
+        try:
+            self._sub_queue.put_nowait(None)
+        except queue.Full:
+            pass
+        if self._sub_store_thread and self._sub_store_thread.is_alive():
+            self._sub_store_thread.join(timeout=5.0)
         if self._sub_sock:
             self._sub_sock.close(0)
             self._sub_sock = None
@@ -141,30 +190,69 @@ class Replicator:
                 recv_started = time.perf_counter()
                 payload = self._sub_sock.recv()
                 data = json.loads(payload)
-                rows = data.get("rows", [])
                 table = data.get("table")
+                rows = data.get("rows", [])
+                chunk_index = int(data.get("chunk_index", 0)) + 1
+                chunk_count = int(data.get("chunk_count", 1))
                 self._logger.info(
-                    "[Replicator] STANDBY received table=%s rows=%d",
+                    "[Replicator] STANDBY received table=%s rows=%d chunk=%d/%d",
                     table,
                     len(rows),
+                    chunk_index,
+                    chunk_count,
                 )
-                store_started = time.perf_counter()
-                self._store.replicate_from(payload)
-                store_elapsed = time.perf_counter() - store_started
-                total_elapsed = time.perf_counter() - recv_started
+                data["_received_elapsed"] = time.perf_counter() - recv_started
+                data["_enqueued_at"] = time.perf_counter()
+                self._sub_queue.put(data, timeout=1.0)
                 self._logger.info(
-                    "[Replicator] STANDBY insert done table=%s rows=%d store_elapsed=%.3fs total_elapsed=%.3fs",
+                    "[Replicator] STANDBY enqueued table=%s rows=%d queue_depth=%d",
                     table,
                     len(rows),
-                    store_elapsed,
-                    total_elapsed,
+                    self._sub_queue.qsize(),
                 )
+            except queue.Full:
+                self._logger.warning("[Replicator] subscriber queue full, dropping payload")
             except zmq.Again:
                 pass  # RCVTIMEO 만료 → 루프 계속
             except zmq.error.ContextTerminated:
                 break
             except Exception:
                 self._logger.exception("[Replicator] recv error")
+
+    def _store_loop(self) -> None:
+        while self._sub_running or not self._sub_queue.empty():
+            try:
+                data = self._sub_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            if data is None:
+                break
+
+            try:
+                table = data.get("table")
+                rows = data.get("rows", [])
+                chunk_index = int(data.get("chunk_index", 0)) + 1
+                chunk_count = int(data.get("chunk_count", 1))
+                recv_elapsed = float(data.get("_received_elapsed", 0.0))
+                enqueued_at = float(data.get("_enqueued_at", time.perf_counter()))
+                queue_wait = time.perf_counter() - enqueued_at
+                store_started = time.perf_counter()
+                self._store.replicate_message(data)
+                store_elapsed = time.perf_counter() - store_started
+                self._logger.info(
+                    "[Replicator] STANDBY insert done table=%s rows=%d chunk=%d/%d recv_elapsed=%.3fs queue_wait=%.3fs store_elapsed=%.3fs queue_depth=%d",
+                    table,
+                    len(rows),
+                    chunk_index,
+                    chunk_count,
+                    recv_elapsed,
+                    queue_wait,
+                    store_elapsed,
+                    self._sub_queue.qsize(),
+                )
+            except Exception:
+                self._logger.exception("[Replicator] store error")
 
     # ── 전체 종료 ────────────────────────────────────────────────────
     def close(self) -> None:

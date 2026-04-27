@@ -18,6 +18,10 @@ sqlite:
 
 replication:
   port: 5558
+  chunk_rows: 1000
+  send_hwm: 200
+  recv_hwm: 200
+  subscriber_queue_size: 200
   peers:
     - 127.0.0.1:5556
     - 127.0.0.1:5560
@@ -32,12 +36,18 @@ collectors:
       rows: 5000
       emit_once: false
     jobs:
-      - name: inventory
+      - name: query1
         sql: SELECT id, name, qty, updated_at FROM inventory WHERE updated_at > :last_ts
         table: inventory
-      - name: orders
+        test_rows: 5000
+      - name: query2
         sql: SELECT order_id, status, amount, created_at FROM orders WHERE created_at > :last_ts
         table: orders
+        test_rows: 3000
+      - name: query3
+        sql: SELECT event_id, event_type, source, created_at FROM audit_events WHERE created_at > :last_ts
+        table: audit_events
+        test_rows: 10000
 
   splunk:
     enabled: false
@@ -47,10 +57,16 @@ collectors:
     password: changeme
     scheme: https
     interval_sec: 120
+    test:
+      enabled: false
+      rows: 10000
+      emit_once: false
     jobs:
       - name: error_events
         query: search index=main level=ERROR earliest=-2m latest=now | table _time, host, message
         table: splunk_errors
+        test_rows: 10000
       - name: access_logs
         query: search index=access earliest=-2m latest=now | table _time, src_ip, uri, status
         table: splunk_access
+        test_rows: 10000

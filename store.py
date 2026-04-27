@@ -71,13 +71,20 @@ class Store:
     def replicate_from(self, payload: bytes) -> None:
         """replicator가 받은 직렬화 페이로드를 그대로 저장."""
         data: dict = json.loads(payload)
+        self.replicate_message(data)
+
+    def replicate_message(self, data: dict[str, Any]) -> None:
+        """역직렬화된 복제 메시지를 저장."""
         table: str = data["table"]
         rows: list[dict] = data["rows"]
         self.upsert_many(table, rows)
 
-    def serialize(self, table: str, rows: list[dict]) -> bytes:
+    def serialize(self, table: str, rows: list[dict], metadata: dict[str, Any] | None = None) -> bytes:
         """복제 전송용 직렬화."""
-        return json.dumps({"table": table, "rows": rows}, ensure_ascii=False, default=str).encode()
+        payload = {"table": table, "rows": rows}
+        if metadata:
+            payload.update(metadata)
+        return json.dumps(payload, ensure_ascii=False, default=str).encode()
 
     def query(self, sql: str, params: tuple = ()) -> list[dict]:
         with self._lock:

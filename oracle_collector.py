@@ -146,6 +146,7 @@ class OracleCollector(BaseCollector):
         for idx, job in enumerate(jobs):
             table = job.get("table", job.get("name", f"oracle_test_{idx}"))
             name = job.get("name", f"job_{idx}")
+            rows_per_job = max(1, int(job.get("test_rows", self._test_rows)))
             started_at = time.perf_counter()
             rows = []
             for i in range(rows_per_job):
