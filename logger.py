@@ -10,7 +10,7 @@ Architecture
   QueueHandler  ──►  multiprocessing.Queue
                               │
                               ▼
-                     [리스너 프로세스]
+                     [QueueListener 스레드] (메인 프로세스 내)
                               │
                     ┌─────────┴──────────┐
                     ▼                    ▼
@@ -19,7 +19,8 @@ Architecture
                               예)  app.2026042614
 
 - 멀티스레딩: 모든 스레드가 동일 QueueHandler를 사용 → 큐에서 직렬화
-- 멀티프로세싱: 자식 프로세스도 같은 큐를 공유 → init_worker_logger() 사용
+- 멀티프로세싱: 자식 프로세스도 같은 큐(multiprocessing.Queue)를 공유
+                → init_worker_logger() 사용
 """
 
 import logging
@@ -118,7 +119,9 @@ class Logger:
     내부 구조
     ─────────
     · 모든 로그 호출은 QueueHandler를 통해 multiprocessing.Queue로 전달된다.
-    · 리스너 프로세스가 큐에서 LogRecord를 꺼내 콘솔 + HourlyFileHandler에 기록한다.
+    · 메인 프로세스 내 QueueListener 스레드가 큐에서 LogRecord를 꺼내
+      콘솔 + HourlyFileHandler에 기록한다.
+    · multiprocessing.Queue를 사용하므로 자식 프로세스에서도 안전하게 공유된다.
     · 파일명 형식: {log_base}.{YYYYMMDDHH}   예) logs/app.2026042614
 
     사용 예
@@ -159,15 +162,29 @@ class Logger:
         self.encoding = encoding
         self.console  = console
 
-        # ── 큐 ────────────────────────────────
+        # ── 큐 (멀티프로세싱 / 멀티스레딩 공용) ──────────
         self._queue: multiprocessing.Queue = multiprocessing.Queue(-1)
 
-        # ── 리스너 프로세스 ────────────────────
-        self._listener: multiprocessing.Process = multiprocessing.Process(
-            target=_listener_worker,
-            args=(self._queue, name, level, fmt, log_base, encoding, console),
-            daemon=True,
-            name=f"{name}-log-listener",
+        # ── 핸들러 구성 ───────────────────────
+        formatter = logging.Formatter(fmt)
+        handlers: list[logging.Handler] = []
+
+        if console:
+            ch = logging.StreamHandler(sys.stdout)
+            ch.setFormatter(formatter)
+            ch.setLevel(level)
+            handlers.append(ch)
+
+        fh = HourlyFileHandler(base_path=log_base, encoding=encoding)
+        fh.setFormatter(formatter)
+        fh.setLevel(level)
+        handlers.append(fh)
+
+        # ── QueueListener (내부 스레드로 큐 → 핸들러 전달) ─
+        self._listener = logging.handlers.QueueListener(
+            self._queue,
+            *handlers,
+            respect_handler_level=True,
         )
         self._listener.start()
 
@@ -190,12 +207,9 @@ class Logger:
         return self._queue
 
     # ── 종료 ─────────────────────────────────────
-    def stop(self, timeout: float = 5.0) -> None:
-        """리스너 프로세스를 정상 종료한다."""
-        self._queue.put_nowait(None)   # sentinel
-        self._listener.join(timeout=timeout)
-        if self._listener.is_alive():
-            self._listener.terminate()
+    def stop(self) -> None:
+        """QueueListener 스레드를 정상 종료한다."""
+        self._listener.stop()
 
     # ── 컨텍스트 매니저 ──────────────────────────
     def __enter__(self):
@@ -225,54 +239,6 @@ class Logger:
 
     def log(self, level: int, msg: str, *args, **kwargs) -> None:
         self._logger.log(level, msg, *args, **kwargs)
-
-
-# ══════════════════════════════════════════════
-# 리스너 프로세스 워커 (최상위 함수 – pickle 가능)
-# ══════════════════════════════════════════════
-def _listener_worker(
-    queue: multiprocessing.Queue,
-    name: str,
-    level: int,
-    fmt: str,
-    log_base: str,
-    encoding: str,
-    console: bool,
-) -> None:
-    """
-    큐에서 LogRecord를 꺼내 핸들러에 전달한다.
-    None(sentinel)을 받으면 종료한다.
-    """
-    formatter = logging.Formatter(fmt)
-    handlers: list[logging.Handler] = []
-
-    if console:
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setFormatter(formatter)
-        ch.setLevel(level)
-        handlers.append(ch)
-
-    fh = HourlyFileHandler(base_path=log_base, encoding=encoding)
-    fh.setFormatter(formatter)
-    fh.setLevel(level)
-    handlers.append(fh)
-
-    while True:
-        try:
-            record = queue.get(block=True)
-            if record is None:   # sentinel → 종료
-                break
-            for h in handlers:
-                if record.levelno >= h.level:
-                    h.handle(record)
-        except (KeyboardInterrupt, SystemExit):
-            break
-        except Exception:
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-
-    for h in handlers:
-        h.close()
 
 
 # ══════════════════════════════════════════════

@@ -59,7 +59,7 @@ def demo_multithreading() -> None:
 # ══════════════════════════════════════════════════════════════════
 # 예제 2 : 멀티프로세싱 – Pool + QueueHandler
 # ══════════════════════════════════════════════════════════════════
-def process_worker(task_id: int, queue: multiprocessing.Queue) -> int:
+def process_worker(task_id: int) -> int:
     """Pool 워커: init_worker_logger로 루트 logger에 QueueHandler 등록"""
     log = logging.getLogger("mp_demo")
     log.info(f"[Process Worker {task_id}] 작업 시작 (PID={multiprocessing.current_process().pid})")
@@ -77,7 +77,7 @@ def demo_multiprocessing() -> None:
     print("  예제 2 : 멀티프로세싱 (Pool)")
     print("=" * 60)
 
-    # Logger 생성 시 리스너 프로세스가 자동 시작된다.
+    # Logger 생성 시 리스너 스레드가 자동 시작된다.
     logger = Logger(name="mp_demo", log_base=LOG_BASE, level=logging.DEBUG)
 
     try:
@@ -87,7 +87,7 @@ def demo_multiprocessing() -> None:
             initargs=(logger.queue, "mp_demo", logging.DEBUG),
         ) as pool:
             tasks = list(range(12))
-            results = pool.map(lambda t: process_worker(t, logger.queue), tasks)
+            results = pool.map(process_worker, tasks)
 
         logger.info(f"모든 프로세스 완료. 결과 합계={sum(results)}")
         print("  → 결과:", results)
