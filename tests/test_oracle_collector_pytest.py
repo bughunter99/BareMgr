@@ -2,7 +2,9 @@ from types import SimpleNamespace
 import sys
 
 from src.logger import Logger
+import src.oracle_collector as oracle_collector_module
 from src.oracle_collector import OracleCollector
+from src.oracle_jobs import OracleJob
 from src.store import Store
 
 
@@ -39,17 +41,24 @@ def test_oracle_collector_validates_connection_before_query(tmp_path, monkeypatc
     collector = OracleCollector(
         cfg={
             "dsn": "dsn",
-            "jobs": [
-                {
-                    "name": "inventory",
-                    "sql": "SELECT id, updated_at FROM inventory WHERE updated_at > :last_ts",
-                    "table": "inventory",
-                }
-            ],
         },
         store=store,
         logger=log,
     )
+    monkeypatch.setattr(
+        oracle_collector_module,
+        "ORACLE_JOBS",
+        [
+            OracleJob(
+                name="inventory",
+                table="inventory",
+                sql="SELECT id, updated_at FROM inventory WHERE updated_at > :last_ts",
+                use_last_ts=True,
+            )
+        ],
+    )
+    collector._jobs = list(oracle_collector_module.ORACLE_JOBS)
+    collector._last_ts = {job.name: "1970-01-01 00:00:00" for job in collector._jobs}
 
     try:
         results = collector.collect()
@@ -58,6 +67,145 @@ def test_oracle_collector_validates_connection_before_query(tmp_path, monkeypatc
             "SELECT sysdate FROM dual",
             "SELECT id, updated_at FROM inventory WHERE updated_at > :last_ts",
         ]
+    finally:
+        collector.stop()
+        store.close()
+        log.stop()
+
+
+def test_oracle_collector_can_resolve_different_db_per_job(tmp_path, monkeypatch) -> None:
+    executed: list[tuple[str, str]] = []
+
+    class FakeCursor:
+        description = [("SEQ",), ("LABEL",)]
+
+        def __init__(self, dsn: str) -> None:
+            self._dsn = dsn
+
+        def execute(self, sql, params=None):
+            executed.append((self._dsn, str(sql)))
+
+        def fetchone(self):
+            return ("2026-04-28",)
+
+        def fetchall(self):
+            return [("1", "ok")]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def __init__(self, dsn: str) -> None:
+            self._dsn = dsn
+
+        def cursor(self):
+            return FakeCursor(self._dsn)
+
+        def close(self):
+            pass
+
+    fake_module = SimpleNamespace(connect=lambda dsn, threaded=True: FakeConnection(dsn))
+    monkeypatch.setitem(sys.modules, "cx_Oracle", fake_module)
+
+    store = Store(str(tmp_path / "app2"))
+    log = Logger(name="test.oracle.collector.alias", log_base=str(tmp_path / "logs" / "oracle-collector-alias"), console=False)
+
+    collector = OracleCollector(
+        cfg={"db": "DB_MAIN"},
+        store=store,
+        logger=log,
+        db_registry={
+            "DB_MAIN": {"user": "u1", "password": "p1", "tns": "main:1521/ORCL"},
+            "DB_TARGET": {"user": "u2", "password": "p2", "tns": "target:1521/ORCL"},
+        },
+    )
+    monkeypatch.setattr(
+        oracle_collector_module,
+        "ORACLE_JOBS",
+        [
+            OracleJob(name="job_main", table="t_main", sql="SELECT 1 FROM dual", db="DB_MAIN", use_last_ts=False),
+            OracleJob(name="job_target", table="t_target", sql="SELECT 2 FROM dual", db="DB_TARGET", use_last_ts=False),
+        ],
+    )
+    collector._jobs = list(oracle_collector_module.ORACLE_JOBS)
+    collector._last_ts = {job.name: "1970-01-01 00:00:00" for job in collector._jobs}
+
+    try:
+        results = collector.collect()
+        assert len(results) == 2
+        dsns = [dsn for dsn, _sql in executed if "SELECT" in _sql]
+        assert dsns[0] == "u1/p1@main:1521/ORCL"
+        assert dsns[1] == "u2/p2@target:1521/ORCL"
+    finally:
+        collector.stop()
+        store.close()
+        log.stop()
+
+
+def test_oracle_collector_applies_post_process_per_job(tmp_path, monkeypatch) -> None:
+    class FakeCursor:
+        description = [("SEQ",), ("LABEL",)]
+
+        def execute(self, sql, params=None):
+            return None
+
+        def fetchone(self):
+            return ("2026-04-28",)
+
+        def fetchall(self):
+            return [("1", "raw")]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    fake_module = SimpleNamespace(connect=lambda dsn, threaded=True: FakeConnection(dsn))
+    monkeypatch.setitem(sys.modules, "cx_Oracle", fake_module)
+
+    def post_process(rows: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for row in rows:
+            new_row = dict(row)
+            new_row["label"] = "processed"
+            out.append(new_row)
+        return out
+
+    store = Store(str(tmp_path / "app3"))
+    log = Logger(name="test.oracle.collector.post", log_base=str(tmp_path / "logs" / "oracle-collector-post"), console=False)
+
+    collector = OracleCollector(
+        cfg={"dsn": "dsn"},
+        store=store,
+        logger=log,
+    )
+    monkeypatch.setattr(
+        oracle_collector_module,
+        "ORACLE_JOBS",
+        [
+            OracleJob(
+                name="job_post",
+                table="t_post",
+                sql="SELECT 1 AS seq, 'raw' AS label FROM dual",
+                use_last_ts=False,
+                post_process=post_process,
+            )
+        ],
+    )
+    collector._jobs = list(oracle_collector_module.ORACLE_JOBS)
+    collector._last_ts = {job.name: "1970-01-01 00:00:00" for job in collector._jobs}
+
+    try:
+        results = collector.collect()
+        assert len(results) == 1
+        table, rows, _jid = results[0]
+        assert table == "t_post"
+        assert rows[0]["label"] == "processed"
     finally:
         collector.stop()
         store.close()

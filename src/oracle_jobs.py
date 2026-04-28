@@ -9,11 +9,20 @@ oracle_jobs.py — OracleCollector가 실행할 수집 잡 코드 정의.
     db          : 실행할 DB alias (예: DB_MAIN, DB_TARGET). 비우면 collector 기본 DB 사용
     use_last_ts : True이면 :last_ts 바인드 변수를 쿼리에 전달한다
     test_rows   : 테스트 모드에서 생성할 더미 행 수
+    post_process: 쿼리 결과 행(list[dict])을 후처리하는 함수
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
+
+
+PostProcessFn = Callable[[list[dict]], list[dict]]
+
+
+def identity_post_process(rows: list[dict]) -> list[dict]:
+    return rows
 
 
 @dataclass
@@ -24,6 +33,7 @@ class OracleJob:
     db: str = ""
     use_last_ts: bool = True
     test_rows: int = 5000
+    post_process: PostProcessFn = identity_post_process
 
 
 # ── 수집 잡 목록 ─────────────────────────────────────────────────────
@@ -31,6 +41,7 @@ class OracleJob:
 # db에는 실행할 DB alias를 넣을 수 있다. (예: DB_MAIN, DB_TARGET)
 # use_last_ts=True 인 잡은 WHERE 조건에 :last_ts 바인드 변수를 사용한다.
 # use_last_ts=False 인 잡은 항상 전체를 조회한다.
+# post_process에 함수명을 넣으면 쿼리 직후 결과를 파이썬 코드로 가공할 수 있다.
 
 ORACLE_JOBS: list[OracleJob] = [
     OracleJob(

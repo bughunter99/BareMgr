@@ -4,6 +4,7 @@ oracle_collector.py — Oracle DB 주기 수집기.
 
 · 수집 잡은 oracle_jobs.py의 ORACLE_JOBS에 코드로 정의한다.
 · 각 잡은 db alias를 지정해 서로 다른 DB에서 조회할 수 있다.
+· 각 잡은 post_process 함수로 쿼리 직후 결과를 후처리할 수 있다.
 · use_last_ts=True 인 잡은 :last_ts 바인드 변수로 증분 수집한다.
 """
 
@@ -132,6 +133,7 @@ class OracleCollector(BaseCollector):
                         cursor.execute(job.sql)
                     cursor.rowfactory = makeDictFactory(cursor)
                     rows = list(cursor.fetchall())
+                    rows = job.post_process(rows)
                     elapsed = time.perf_counter() - started_at
                     if rows:
                         results.append((job.table, rows, jid))
