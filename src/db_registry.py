@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-db_registry.py — 공유 DB 커넥션 레지스트리.
+db_registry.py — 공유 Oracle 커넥션 레지스트리.
 
-config의 db_connections 목록을 alias 기반 딕셔너리로 구축하고,
+config의 oracle_connections 목록을 alias 기반 딕셔너리로 구축하고,
 각 컴포넌트가 alias만으로 DSN 문자열 또는 pool 설정을 얻을 수 있도록 한다.
 
 config 구조 예시:
-    db_connections:
+        oracle_connections:
       - alias: DB_MAIN
         tns: 192.168.1.100:1521/ORCL
         user: user
@@ -37,8 +37,8 @@ from typing import Any
 
 
 def build_registry(cfg: dict[str, Any]) -> dict[str, dict]:
-    """db_connections 목록을 alias → entry 딕셔너리로 변환한다."""
-    entries = cfg.get("db_connections", []) or []
+    """oracle_connections 목록을 alias → entry 딕셔너리로 변환한다."""
+    entries = cfg.get("oracle_connections", []) or cfg.get("db_connections", []) or []
     return {
         str(e["alias"]).strip(): e
         for e in entries

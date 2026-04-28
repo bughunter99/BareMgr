@@ -24,6 +24,7 @@ app.py — Active/Standby 통합 앱.
 import signal
 import threading
 import time
+import re
 from typing import Any
 
 from .collector import BaseCollector
@@ -60,7 +61,23 @@ class App:
         self._db_registry = build_registry(self._cfg)
 
         # ── 저장소 ───────────────────────────────────────────────────
-        self._store = Store(self._cfg["sqlite"]["path"])
+        node_id = str(self._cfg.get("node_id", "")).strip()
+        m = re.match(r"^node(\d+)$", node_id, re.IGNORECASE)
+        default_sqlite_base = f"data/app{m.group(1)}" if m else f"data/{node_id or 'app'}"
+        sqlite_base_dir = str(
+            (self._cfg.get("sqlite", {}) or {}).get("path", default_sqlite_base)
+        ).strip()
+        self._store = Store(
+            sqlite_base_dir,
+            logger=self._logger,
+            sqlite_cfg=self._cfg.get("sqlite", {}),
+            replication_cfg=self._cfg.get("replication", {}),
+            sqlite_connections=(
+                self._cfg.get("sqlite_connections", [])
+                or self._cfg.get("sql_connections", [])
+            ),
+        )
+        self._store.initialize_registered_ddls()
 
         # ── 복제기 ───────────────────────────────────────────────────
         _replicator = Replicator(

@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS job2_results (
+  _rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+  collected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  seq TEXT,
+  label TEXT,
+  raw_tags TEXT,
+  tags TEXT
+);
