@@ -91,9 +91,9 @@ class App:
         self._orchestrator = AppOrchestrator(
             cfg=self._cfg,
             logger=self._logger,
-            processing_callback=self._run_processing_job,
-            sync_callback=self._run_sync_job,
-            etc_callback=self._run_etc_job,
+            processing_callback=self._processing_pipeline.run,
+            sync_callback=self._sync_manager.run,
+            etc_callback=self._etc_manager.run,
         )
 
         # 상태 전환 감시 스레드
@@ -169,15 +169,6 @@ class App:
                 self._apply_role(current)
                 self._prev_active = current
             time.sleep(0.5)
-
-    def _run_processing_job(self, ctx: dict[str, Any]) -> None:
-        self._processing_pipeline.run(ctx)
-
-    def _run_sync_job(self, ctx: dict[str, Any]) -> None:
-        self._sync_manager.run(ctx)
-
-    def _run_etc_job(self, ctx: dict[str, Any]) -> None:
-        self._etc_manager.run(ctx)
 
     def _build_failover_runtime_status(self) -> str:
         collector_parts = []

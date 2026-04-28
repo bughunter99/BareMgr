@@ -8,17 +8,15 @@ import json
 from pathlib import Path
 import queue
 import random
-import re
 import sqlite3
 import threading
 import time
 from typing import Any
-from urllib import error as urlerror
-from urllib import request as urlrequest
 
 from .logger import Logger
 from .oracle_connection_manager import OracleConnectionManager
-from .oracle_driver import get_cx_oracle
+from .drone_client import DroneClient
+from .processing_oracle import OracleResultWriter, OracleSessionPool
 from .oracle_utils import makeDictFactory, validate_oracle_connection
 from .store import Store
 
@@ -34,84 +32,6 @@ def _process_object_worker(obj: dict[str, Any]) -> dict[str, Any]:
     result["result_digest"] = digest
     result["processed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     return result
-
-
-class OracleSessionPool:
-    def __init__(self, cfg: dict[str, Any], logger: Logger) -> None:
-        self._logger = logger
-        self.enabled = bool(cfg.get("enabled", False))
-        self._dsn = str(cfg.get("dsn", "")).strip()
-        self._user = str(cfg.get("user", "")).strip()
-        self._password = str(cfg.get("password", "")).strip()
-        self._min = max(1, int(cfg.get("min", 1)))
-        self._max = max(self._min, int(cfg.get("max", 10)))
-        self._increment = max(1, int(cfg.get("increment", 1)))
-        self._threaded = bool(cfg.get("threaded", True))
-        self._getmode = str(cfg.get("getmode", "wait")).strip().lower()
-        self._pool = None
-        self._lock = threading.Lock()
-
-        if self.enabled and (not self._dsn or not self._user or not self._password):
-            self._logger.warning(
-                "[Processing] oracle_pool enabled but user/password/dsn not fully configured; disabling pool"
-            )
-            self.enabled = False
-
-    def _get_pool(self):
-        cx_Oracle = get_cx_oracle()
-
-        with self._lock:
-            if self._pool is not None:
-                return self._pool
-
-            getmode = cx_Oracle.SPOOL_ATTRVAL_WAIT
-            if self._getmode == "nowait":
-                getmode = cx_Oracle.SPOOL_ATTRVAL_NOWAIT
-
-            self._pool = cx_Oracle.SessionPool(
-                user=self._user,
-                password=self._password,
-                dsn=self._dsn,
-                min=self._min,
-                max=self._max,
-                increment=self._increment,
-                threaded=self._threaded,
-                getmode=getmode,
-            )
-            self._logger.info(
-                "[Processing] oracle_pool created min=%d max=%d increment=%d",
-                self._min,
-                self._max,
-                self._increment,
-            )
-            return self._pool
-
-    def fetch_many(self, sql: str, params: dict[str, Any], limit: int) -> list[dict[str, Any]]:
-        if not self.enabled:
-            return []
-        if not sql:
-            return []
-
-        pool = self._get_pool()
-        conn = pool.acquire()
-        cursor = conn.cursor()
-        try:
-            validate_oracle_connection(conn)
-            cursor.execute(sql, params)
-            cursor.rowfactory = makeDictFactory(cursor)
-            return list(cursor.fetchmany(limit))
-        finally:
-            cursor.close()
-            pool.release(conn)
-
-    def close(self) -> None:
-        with self._lock:
-            if self._pool is not None:
-                try:
-                    self._pool.close()
-                except Exception:
-                    pass
-                self._pool = None
 
 
 class ObjectResultLogger:
@@ -179,168 +99,6 @@ class ObjectResultLogger:
                 return len(rows)
             finally:
                 conn.close()
-
-
-class DroneClient:
-    def __init__(self, cfg: dict[str, Any], logger: Logger) -> None:
-        self._logger = logger
-        self.enabled = bool(cfg.get("enabled", False))
-        self._dry_run = bool(cfg.get("dry_run", True))
-        self._url = str(cfg.get("url", "")).strip()
-        self._timeout_sec = float(cfg.get("timeout_sec", 5.0))
-        self._auth_token = str(cfg.get("auth_token", "")).strip()
-        self._extra_headers = cfg.get("headers", {}) or {}
-
-    def send_many(self, results: list[dict[str, Any]]) -> int:
-        if not self.enabled:
-            return 0
-        if self._dry_run:
-            self._logger.info("[Processing] drone dry-run send count=%d", len(results))
-            return len(results)
-        if not self._url:
-            self._logger.warning("[Processing] drone enabled but url missing")
-            return 0
-
-        sent = 0
-        for item in results:
-            body = json.dumps(item, ensure_ascii=False, default=str).encode("utf-8")
-            headers = {
-                "Content-Type": "application/json",
-            }
-            headers.update({str(k): str(v) for k, v in self._extra_headers.items()})
-            if self._auth_token:
-                headers["Authorization"] = f"Bearer {self._auth_token}"
-
-            req = urlrequest.Request(self._url, data=body, headers=headers, method="POST")
-            try:
-                with urlrequest.urlopen(req, timeout=self._timeout_sec) as resp:
-                    status = getattr(resp, "status", 200)
-                    if 200 <= int(status) < 300:
-                        sent += 1
-                    else:
-                        self._logger.warning(
-                            "[Processing] drone send failed obj_id=%s status=%s",
-                            item.get("obj_id"),
-                            status,
-                        )
-            except (urlerror.URLError, TimeoutError):
-                self._logger.warning(
-                    "[Processing] drone send error obj_id=%s",
-                    item.get("obj_id"),
-                )
-        return sent
-
-
-class OracleResultWriter:
-    def __init__(
-        self,
-        cfg: dict[str, Any],
-        logger: Logger,
-        connection_manager: OracleConnectionManager | None = None,
-    ) -> None:
-        self._logger = logger
-        self.enabled = bool(cfg.get("enabled", False))
-        self._dry_run = bool(cfg.get("dry_run", True))
-        self._dsn = str(cfg.get("dsn", "")).strip()
-        self._table = self._normalize_table_name(str(cfg.get("table", "PIPELINE_RESULTS")))
-        self._ensure_table_enabled = bool(cfg.get("ensure_table", True))
-        self._connection_manager = connection_manager or OracleConnectionManager(logger)
-        self._owns_connection_manager = connection_manager is None
-
-    def _normalize_table_name(self, table_name: str) -> str:
-        normalized = str(table_name).strip().upper()
-        if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", normalized):
-            raise ValueError(f"Invalid Oracle table name: {table_name}")
-        return normalized
-
-    def _get_conn(self):
-        return self._connection_manager.get_connection(self._dsn, threaded=True)
-
-    def _ensure_table(self) -> None:
-        cx_Oracle = get_cx_oracle()
-
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        try:
-            cursor.execute(
-                f"""
-                CREATE TABLE {self._table} (
-                    id NUMBER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                    obj_id VARCHAR2(128),
-                    node_id VARCHAR2(128),
-                    status VARCHAR2(16),
-                    score NUMBER,
-                    digest VARCHAR2(128),
-                    payload_json CLOB,
-                    created_at TIMESTAMP(6) DEFAULT SYSTIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-        except cx_Oracle.DatabaseError as exc:
-            error_obj = exc.args[0] if exc.args else None
-            if getattr(error_obj, "code", None) != 955:
-                raise
-        finally:
-            cursor.close()
-
-    def write_many(self, results: list[dict[str, Any]]) -> int:
-        if not self.enabled:
-            return 0
-        if self._dry_run:
-            self._logger.info("[Processing] oracle_write dry-run count=%d", len(results))
-            return len(results)
-        if not self._dsn:
-            self._logger.warning("[Processing] oracle_write enabled but dsn missing")
-            return 0
-        if not results:
-            return 0
-
-        if self._ensure_table_enabled:
-            self._ensure_table()
-
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        try:
-            rows = [
-                (
-                    str(item.get("obj_id", "")),
-                    str(item.get("node_id", "")),
-                    str(item.get("result_status", "")),
-                    int(item.get("result_score", 0)),
-                    str(item.get("result_digest", "")),
-                    json.dumps(item, ensure_ascii=False, default=str),
-                )
-                for item in results
-            ]
-            cursor.executemany(
-                f"""
-                INSERT INTO {self._table} (
-                    obj_id,
-                    node_id,
-                    status,
-                    score,
-                    digest,
-                    payload_json
-                ) VALUES (
-                    :1,
-                    :2,
-                    :3,
-                    :4,
-                    :5,
-                    :6
-                )
-                """,
-                rows,
-            )
-            conn.commit()
-            return len(rows)
-        finally:
-            cursor.close()
-
-    def close(self) -> None:
-        if self._owns_connection_manager:
-            self._connection_manager.close_all()
 
 
 class ProcessingPipeline:
