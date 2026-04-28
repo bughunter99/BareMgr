@@ -4,5 +4,5 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; STATE_FILE="${SCRIPT
 [[ $# -gt 1 ]] && { echo "Usage: $(basename "$0") [config-file]"; exit 1; }
 CONFIG_PATH="${1:-}"; [[ -z "${CONFIG_PATH}" && -f "${STATE_FILE}" ]] && { source "${STATE_FILE}"; CONFIG_PATH="${CONFIG_PATH:-}"; }
 [[ -z "${CONFIG_PATH}" || ! -f "${CONFIG_PATH}" ]] && { echo "Config not found. Pass config-file or start first." >&2; exit 1; }
-(cd "${SCRIPT_DIR}" && "${PYTHON_BIN}" -m src.failover_stop_db "${CONFIG_PATH}" || true; "${PYTHON_BIN}" -m src.failover_stop_zmq "${CONFIG_PATH}" --timeout-ms 5000 || true)
+(cd "${SCRIPT_DIR}" && "${PYTHON_BIN}" -m src.failover_db_stop "${CONFIG_PATH}" || true; "${PYTHON_BIN}" -m src.failover_zmq_stop "${CONFIG_PATH}" --timeout-ms 5000 || true)
 echo "Stop commands sent with config: ${CONFIG_PATH}"
