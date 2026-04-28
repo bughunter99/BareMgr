@@ -48,55 +48,171 @@ class OracleJob:
     post_processes: list[PostProcessFn] = field(default_factory=list)
 
 
+class OracleJob1(OracleJob):
+    SQL = """
+        SELECT
+            1 AS seq,
+            'job1' AS label,
+            TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS') AS collected_at
+        FROM dual
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="job1",
+            table="job1_results",
+            sql=self.SQL,
+            db="DB_MAIN",
+            use_last_ts=False,
+            test_rows=5000,
+            post_process=self.post_process,
+        )
+
+    @staticmethod
+    def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
+        out: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            item["job"] = context["job_name"]
+            item["db"] = context["db_alias"]
+            out.append(item)
+        return out
+
+
+class OracleJob2(OracleJob):
+    SQL = """
+        SELECT
+            2 AS seq,
+            'job2' AS label,
+            'A|B|C' AS raw_tags
+        FROM dual
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="job2",
+            table="job2_results",
+            sql=self.SQL,
+            db="DB_TARGET",
+            use_last_ts=False,
+            test_rows=3000,
+            post_process=self.post_process,
+        )
+
+    @staticmethod
+    def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
+        out: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            tags = str(item.get("raw_tags", "")).split("|")
+            item["tags"] = [t for t in tags if t]
+            item["jid"] = context["jid"]
+            out.append(item)
+        return out
+
+
+class OracleJob3(OracleJob):
+    SQL = """
+        SELECT
+            3 AS seq,
+            'job3' AS label,
+            '123' AS amount,
+            'KRW' AS currency
+        FROM dual
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="job3",
+            table="job3_results",
+            sql=self.SQL,
+            db="DB_MAIN",
+            use_last_ts=False,
+            test_rows=4000,
+            post_process=self.post_process,
+        )
+
+    @staticmethod
+    def post_process(rows: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["amount"] = int(str(item.get("amount", "0")))
+            except ValueError:
+                item["amount"] = 0
+            out.append(item)
+        return out
+
+
+class OracleJob4(OracleJob):
+    SQL = """
+        SELECT
+            4 AS seq,
+            'job4' AS label,
+            '  mixed_case_text  ' AS raw_text
+        FROM dual
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="job4",
+            table="job4_results",
+            sql=self.SQL,
+            db="DB_TARGET",
+            use_last_ts=False,
+            test_rows=2000,
+            post_process=self.post_process,
+        )
+
+    @staticmethod
+    def post_process(rows: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            item["text"] = str(item.get("raw_text", "")).strip().lower()
+            out.append(item)
+        return out
+
+
+class OracleJob5(OracleJob):
+    SQL = """
+        SELECT
+            5 AS seq,
+            'job5' AS label,
+            TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF3') AS event_ts
+        FROM dual
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="job5",
+            table="job5_results",
+            sql=self.SQL,
+            db="DB_MAIN",
+            use_last_ts=False,
+            test_rows=1000,
+            post_process=self.post_process,
+        )
+
+    @staticmethod
+    def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
+        out: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            item["processed_at"] = context["collected_at"]
+            item["pipeline_key"] = f"{context['job_name']}:{context['table']}"
+            out.append(item)
+        return out
+
+
 # ── 수집 잡 목록 ─────────────────────────────────────────────────────
-# sql을 실제 쿼리로 교체하면 된다.
-# db에는 실행할 DB alias를 넣을 수 있다. (예: DB_MAIN, DB_TARGET)
-# use_last_ts=True 인 잡은 WHERE 조건에 :last_ts 바인드 변수를 사용한다.
-# use_last_ts=False 인 잡은 항상 전체를 조회한다.
-# post_process는 아래 두 형태를 모두 지원한다.
-#   - post_process(rows)
-#   - post_process(rows, context)
-# post_processes에 여러 함수를 넣으면 순차 적용된다.
+# 각 클래스에 SQL과 전용 후처리 로직을 묶어 정의한다.
 
 ORACLE_JOBS: list[OracleJob] = [
-    OracleJob(
-        name="job1",
-        table="job1_results",
-        sql="SELECT 1 AS seq, 'job1' AS label FROM dual",
-        db="DB_MAIN",
-        use_last_ts=False,
-        test_rows=5000,
-    ),
-    OracleJob(
-        name="job2",
-        table="job2_results",
-        sql="SELECT 2 AS seq, 'job2' AS label FROM dual",
-        db="DB_TARGET",
-        use_last_ts=False,
-        test_rows=3000,
-    ),
-    OracleJob(
-        name="job3",
-        table="job3_results",
-        sql="SELECT 3 AS seq, 'job3' AS label FROM dual",
-        db="DB_MAIN",
-        use_last_ts=False,
-        test_rows=4000,
-    ),
-    OracleJob(
-        name="job4",
-        table="job4_results",
-        sql="SELECT 4 AS seq, 'job4' AS label FROM dual",
-        db="DB_TARGET",
-        use_last_ts=False,
-        test_rows=2000,
-    ),
-    OracleJob(
-        name="job5",
-        table="job5_results",
-        sql="SELECT 5 AS seq, 'job5' AS label FROM dual",
-        db="DB_MAIN",
-        use_last_ts=False,
-        test_rows=1000,
-    ),
+    OracleJob1(),
+    OracleJob2(),
+    OracleJob3(),
+    OracleJob4(),
+    OracleJob5(),
 ]
