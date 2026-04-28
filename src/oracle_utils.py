@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from .oracle_driver import get_cx_oracle
@@ -9,7 +10,7 @@ from .oracle_driver import get_cx_oracle
 ORACLE_CONNECTION_CHECK_SQL = "SELECT sysdate FROM dual"
 
 
-def makeDictFactory(cursor: Any):
+def makeDictFactory(cursor: Any) -> Callable[..., dict[str, Any]]:
     column_names = [desc[0].lower() for desc in cursor.description]
 
     def _factory(*args: Any) -> dict[str, Any]:
@@ -31,6 +32,6 @@ def validate_oracle_connection(
         cursor.close()
 
 
-def get_oracle_error_type():
+def get_oracle_error_type() -> Any:
     cx_Oracle = get_cx_oracle()
     return cx_Oracle.DatabaseError

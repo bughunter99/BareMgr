@@ -24,7 +24,7 @@ def _normalize_identifier(name: str) -> str:
 
 
 class SyncCheckpointStore:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str) -> None:
         self._db_path = db_path
         self._lock = threading.Lock()
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ class SyncCheckpointStore:
 
 
 class SyncBase:
-    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None):
+    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None) -> None:
         self._cfg = cfg
         self._logger = logger
 
@@ -121,17 +121,17 @@ class SyncBase:
         self._source_pool_cfg = sync_cfg.get("source_pool", {}) or {}
         self._target_pool_cfg = sync_cfg.get("target_pool", {}) or {}
 
-    def _connect(self, dsn: str):
+    def _connect(self, dsn: str) -> Any:
         cx_Oracle = get_cx_oracle()
         return cx_Oracle.connect(dsn, threaded=True)
 
-    def _acquire_source_conn(self):
+    def _acquire_source_conn(self) -> tuple[Any, Any | None]:
         if bool(self._source_pool_cfg.get("enabled", False)):
             pool = self._connection_manager.get_session_pool(self._source_pool_cfg)
             return pool.acquire(), pool
         return self._connect(self.source_dsn), None
 
-    def _acquire_target_conn(self):
+    def _acquire_target_conn(self) -> tuple[Any, Any | None]:
         if bool(self._target_pool_cfg.get("enabled", False)):
             pool = self._connection_manager.get_session_pool(self._target_pool_cfg)
             return pool.acquire(), pool
@@ -148,7 +148,7 @@ class SyncBase:
 
 
 class SyncOracleToOracle(SyncBase):
-    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None):
+    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None) -> None:
         super().__init__(cfg=cfg, logger=logger, connection_manager=connection_manager)
         sync_cfg = cfg.get("pipeline", {}).get("sync", {})
         self._ensure_table = bool(sync_cfg.get("ensure_table", False))
@@ -408,7 +408,7 @@ class SyncOracleToOracle(SyncBase):
 
 
 class SyncJobManager:
-    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None):
+    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None) -> None:
         self._logger = logger
         self._syncer = SyncOracleToOracle(cfg=cfg, logger=logger, connection_manager=connection_manager)
 

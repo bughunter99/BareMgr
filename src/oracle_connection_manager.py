@@ -15,7 +15,7 @@ class OracleConnectionManager:
         self._connections: dict[tuple[str, bool], Any] = {}
         self._session_pools: dict[tuple[str, str, str, int, int, int, bool, str], Any] = {}
 
-    def get_connection(self, dsn: str, *, threaded: bool = True):
+    def get_connection(self, dsn: str, *, threaded: bool = True) -> Any:
         normalized_dsn = str(dsn).strip()
         if not normalized_dsn:
             raise ValueError("Oracle DSN is required")
@@ -73,7 +73,7 @@ class OracleConnectionManager:
             str(normalized_cfg["getmode"]),
         )
 
-    def get_session_pool(self, cfg: dict[str, Any]):
+    def get_session_pool(self, cfg: dict[str, Any]) -> Any | None:
         normalized = self._normalize_pool_cfg(cfg)
         if not normalized["enabled"]:
             return None
