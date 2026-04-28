@@ -3,91 +3,11 @@ from __future__ import annotations
 
 import json
 import re
-import threading
 from typing import Any
 
 from .logger import Logger
 from .oracle_connection_manager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
-from .oracle_utils import makeDictFactory, validate_oracle_connection
-
-
-class OracleSessionPool:
-    def __init__(self, cfg: dict[str, Any], logger: Logger) -> None:
-        self._logger = logger
-        self.enabled = bool(cfg.get("enabled", False))
-        self._dsn = str(cfg.get("dsn", "")).strip()
-        self._user = str(cfg.get("user", "")).strip()
-        self._password = str(cfg.get("password", "")).strip()
-        self._min = max(1, int(cfg.get("min", 1)))
-        self._max = max(self._min, int(cfg.get("max", 10)))
-        self._increment = max(1, int(cfg.get("increment", 1)))
-        self._threaded = bool(cfg.get("threaded", True))
-        self._getmode = str(cfg.get("getmode", "wait")).strip().lower()
-        self._pool = None
-        self._lock = threading.Lock()
-
-        if self.enabled and (not self._dsn or not self._user or not self._password):
-            self._logger.warning(
-                "[Processing] oracle_pool enabled but user/password/dsn not fully configured; disabling pool"
-            )
-            self.enabled = False
-
-    def _get_pool(self):
-        cx_oracle = get_cx_oracle()
-
-        with self._lock:
-            if self._pool is not None:
-                return self._pool
-
-            getmode = cx_oracle.SPOOL_ATTRVAL_WAIT
-            if self._getmode == "nowait":
-                getmode = cx_oracle.SPOOL_ATTRVAL_NOWAIT
-
-            self._pool = cx_oracle.SessionPool(
-                user=self._user,
-                password=self._password,
-                dsn=self._dsn,
-                min=self._min,
-                max=self._max,
-                increment=self._increment,
-                threaded=self._threaded,
-                getmode=getmode,
-            )
-            self._logger.info(
-                "[Processing] oracle_pool created min=%d max=%d increment=%d",
-                self._min,
-                self._max,
-                self._increment,
-            )
-            return self._pool
-
-    def fetch_many(self, sql: str, params: dict[str, Any], limit: int) -> list[dict[str, Any]]:
-        if not self.enabled:
-            return []
-        if not sql:
-            return []
-
-        pool = self._get_pool()
-        conn = pool.acquire()
-        cursor = conn.cursor()
-        try:
-            validate_oracle_connection(conn)
-            cursor.execute(sql, params)
-            cursor.rowfactory = makeDictFactory(cursor)
-            return list(cursor.fetchmany(limit))
-        finally:
-            cursor.close()
-            pool.release(conn)
-
-    def close(self) -> None:
-        with self._lock:
-            if self._pool is not None:
-                try:
-                    self._pool.close()
-                except Exception:
-                    pass
-                self._pool = None
 
 
 class OracleResultWriter:

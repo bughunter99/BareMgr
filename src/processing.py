@@ -15,7 +15,7 @@ from typing import Any
 
 from .logger import Logger
 from .oracle_connection_manager import OracleConnectionManager
-from .drone_client import DroneClient
+from .processing_drone_client import DroneClient
 from .processing_oracle import OracleResultWriter, OracleSessionPool
 from .oracle_utils import makeDictFactory, validate_oracle_connection
 from .store import Store

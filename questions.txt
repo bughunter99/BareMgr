@@ -26,3 +26,9 @@ drone은 processing에서만 쓰는게 아니라, 다른데서도 쓸 수 있는
 
 app.py에 보면 오케스트레이터에 이것저것 등록을 하는데, 여기 collector도 같이 들어가야되는거 아니야?
 
+
+여기 OracleConnectionManager도 있고, sessionpool도 있어서 좀 헷갈리는데,
+OracleConnectionManager는 A 디비, B 디비 이렇게 여러 디비를 관리하는거고,그 A 디비에 connection을 10개 만들어서 여러 thread가 쓰겠다는게 session pool이니까
+OracleConnectionManager이 session pool도 가지고 있게 설계를 변경해줘. 어때? 이게 맞는거 같아?
+
+

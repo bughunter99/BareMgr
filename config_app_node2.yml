@@ -122,6 +122,26 @@ pipeline:
     batch_size: 500
     ensure_table: false
     checkpoint_db: data/app2/pipeline/sync_checkpoint.db
+    source_pool:
+      enabled: false
+      user: user
+      password: password
+      dsn: 192.168.1.100:1521/ORCL
+      min: 1
+      max: 5
+      increment: 1
+      threaded: true
+      getmode: wait
+    target_pool:
+      enabled: false
+      user: user
+      password: password
+      dsn: 192.168.1.101:1521/ORCL
+      min: 1
+      max: 5
+      increment: 1
+      threaded: true
+      getmode: wait
   etc:
     enabled: true
     interval_sec: 60
@@ -131,6 +151,16 @@ pipeline:
       db_path: data/app2/pipeline/etc_runs.db
     oracle:
       dsn: user/password@192.168.1.100:1521/ORCL
+      oracle_pool:
+        enabled: false
+        user: user
+        password: password
+        dsn: 192.168.1.100:1521/ORCL
+        min: 1
+        max: 5
+        increment: 1
+        threaded: true
+        getmode: wait
     tasks:
       - name: etc-heartbeat
         type: sqlite_heartbeat
@@ -153,6 +183,16 @@ collectors:
     enabled: true
     dsn: user/password@192.168.1.100:1521/ORCL
     interval_sec: 60
+    oracle_pool:
+      enabled: false
+      user: user
+      password: password
+      dsn: 192.168.1.100:1521/ORCL
+      min: 2
+      max: 10
+      increment: 1
+      threaded: true
+      getmode: wait
     test:
       enabled: true
       rows: 5000

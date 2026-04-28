@@ -68,6 +68,8 @@ class OracleCollector(BaseCollector):
         }
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_connection_manager = connection_manager is None
+        self._pool_cfg = cfg.get("oracle_pool", {}) or {}
+        self._pool_enabled = bool(self._pool_cfg.get("enabled", False))
 
     # ── 연결 관리 ────────────────────────────────────────────────────
     def _get_conn(self):
@@ -76,13 +78,19 @@ class OracleCollector(BaseCollector):
     def _close_conn(self) -> None:
         self._connection_manager.invalidate(self._dsn, threaded=True)
 
+    def _acquire_conn(self):
+        if self._pool_enabled:
+            pool = self._connection_manager.get_session_pool(self._pool_cfg)
+            return pool.acquire(), pool
+        return self._get_conn(), None
+
     # ── 수집 ────────────────────────────────────────────────────────
     def collect(self) -> list[tuple[str, list[dict], str]]:
         if self._test_mode:
             return self._collect_test_rows()
 
         results: list[tuple[str, list[dict], str]] = []
-        conn = self._get_conn()
+        conn, _pool = self._acquire_conn()
         validate_oracle_connection(conn)
         cursor = conn.cursor()
 
@@ -121,10 +129,16 @@ class OracleCollector(BaseCollector):
                         )
                 except Exception:
                     self.logger.exception("[OracleCollector] job=%s query error", name)
-                    self._close_conn()
+                    cursor.close()
+                    if _pool is not None:
+                        _pool.release(conn)
+                    else:
+                        self._close_conn()
                     raise
 
         cursor.close()
+        if _pool is not None:
+            _pool.release(conn)
         return results
 
     def _collect_test_rows(self) -> list[tuple[str, list[dict], str]]:

@@ -1,35 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_BIN="${BAREMGR_PYTHON:-python3}"
-
-usage() {
-	echo "Usage: $(basename "$0") <config-file>"
-	echo "Example: $(basename "$0") config_app_node1.yml"
-}
-
-if [[ $# -ne 1 ]]; then
-	usage
-	exit 1
-fi
-
-CONFIG_INPUT="$1"
-if [[ "${CONFIG_INPUT}" = /* ]]; then
-	CONFIG_PATH="${CONFIG_INPUT}"
-else
-	CONFIG_PATH="${SCRIPT_DIR}/${CONFIG_INPUT}"
-fi
-
-if [[ ! -f "${CONFIG_PATH}" ]]; then
-	echo "Config not found: ${CONFIG_PATH}" >&2
-	exit 1
-fi
-
-(
-	cd "${SCRIPT_DIR}"
-	"${PYTHON_BIN}" -m src.failover_db_stop "${CONFIG_PATH}" || true
-	"${PYTHON_BIN}" -m src.failover_zmq_stop "${CONFIG_PATH}" --timeout-ms 5000 || true
-)
-
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; STATE_FILE="${SCRIPT_DIR}/.baremgr/last_started.state"; PYTHON_BIN="${BAREMGR_PYTHON:-python3}"
+[[ $# -gt 1 ]] && { echo "Usage: $(basename "$0") [config-file]"; exit 1; }
+CONFIG_PATH="${1:-}"; [[ -z "${CONFIG_PATH}" && -f "${STATE_FILE}" ]] && { source "${STATE_FILE}"; CONFIG_PATH="${CONFIG_PATH:-}"; }
+[[ -z "${CONFIG_PATH}" || ! -f "${CONFIG_PATH}" ]] && { echo "Config not found. Pass config-file or start first." >&2; exit 1; }
+(cd "${SCRIPT_DIR}" && "${PYTHON_BIN}" -m src.failover_db_stop "${CONFIG_PATH}" || true; "${PYTHON_BIN}" -m src.failover_zmq_stop "${CONFIG_PATH}" --timeout-ms 5000 || true)
 echo "Stop commands sent with config: ${CONFIG_PATH}"

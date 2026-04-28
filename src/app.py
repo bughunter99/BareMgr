@@ -61,7 +61,7 @@ class App:
         self._store = Store(self._cfg["sqlite"]["path"])
 
         # ── 복제기 ───────────────────────────────────────────────────
-        self._replicator = Replicator(
+        _replicator = Replicator(
             cfg=self._cfg["replication"],
             store=self._store,
             logger=self._logger,
@@ -72,7 +72,7 @@ class App:
             logger=self._logger,
             connection_manager=self._oracle_connection_manager,
         )
-        self._sync_manager = SyncJobManager(cfg=self._cfg, logger=self._logger)
+        self._sync_manager = SyncJobManager(cfg=self._cfg, logger=self._logger, connection_manager=self._oracle_connection_manager)
         self._etc_manager = EtcManager(
             cfg=self._cfg,
             store=self._store,
@@ -81,19 +81,21 @@ class App:
         )
 
         # ── 수집기 목록 ─────────────────────────────────────────────
-        self._collectors: list[BaseCollector] = self._build_collectors()
+        _collectors: list[BaseCollector] = self._build_collectors()
 
         # ── Failover 노드 ────────────────────────────────────────────
         self._node: Failovernode = self._build_failover_node(config_file)
         self._node.set_status_provider(self._build_failover_runtime_status)
 
-        # ── 주기 작업 오케스트레이터 (1단계: 스케줄 기반 골격) ───────
+        # ── 주기 작업 오케스트레이터 ─────────────────────────────────
         self._orchestrator = AppOrchestrator(
             cfg=self._cfg,
             logger=self._logger,
             processing_callback=self._processing_pipeline.run,
             sync_callback=self._sync_manager.run,
             etc_callback=self._etc_manager.run,
+            collectors=_collectors,
+            replicator=_replicator,
         )
 
         # 상태 전환 감시 스레드
@@ -143,23 +145,15 @@ class App:
     # ── 수집 콜백 (active일 때 peer로 복제) ─────────────────────────
     def _on_collect(self, table: str, rows: list[dict]) -> None:
         if self._node.isActive:
-            self._replicator.publish(table, rows)
+            self._orchestrator.publish(table, rows)
 
     # ── Active/Standby 전환 처리 ─────────────────────────────────────
     def _apply_role(self, is_active: bool) -> None:
-        self._orchestrator.set_active(is_active)
         if is_active:
             self._logger.info("[App] → ACTIVE: starting collectors and publisher")
-            self._replicator.stop_subscriber()
-            self._replicator.start_publisher()
-            for c in self._collectors:
-                c.set_active(True)
         else:
             self._logger.info("[App] → STANDBY: stopping collectors and starting subscriber")
-            for c in self._collectors:
-                c.set_active(False)
-            self._replicator.stop_publisher()
-            self._replicator.start_subscriber()
+        self._orchestrator.set_active(is_active)
 
     def _watch_role(self) -> None:
         """FailoverNode의 isActive 변화를 감지해 역할 전환."""
@@ -172,7 +166,7 @@ class App:
 
     def _build_failover_runtime_status(self) -> str:
         collector_parts = []
-        for collector in self._collectors:
+        for collector in self._orchestrator.collectors:
             status = collector.get_status()
             collector_parts.append(
                 f"{status['name']}:{'active' if status['active'] else 'standby'}/{ 'alive' if status['thread_alive'] else 'dead'}"
@@ -203,14 +197,8 @@ class App:
         )
         self._running = True
 
-        # 수집기 스레드 시작 (처음엔 standby 상태이므로 collect 건너뜀)
-        for c in self._collectors:
-            c.start()
-
-        # Standby 상태로 시작: 복제 수신기를 켜두기
-        self._replicator.start_subscriber()
-
-        # processing/sync 스케줄러 시작 (active 전환 시 실행됨)
+        # 수집기·복제기·processing/sync 스케줄러 시작
+        # (수집기는 처음엔 standby 상태이므로 collect 건너뜀)
         self._orchestrator.start()
 
         # 역할 감시 스레드
@@ -252,14 +240,10 @@ class App:
         # FailoverNode 블로킹 루프 종료
         self._node.stop()
 
-        for c in self._collectors:
-            c.stop()
-
         self._orchestrator.stop()
         self._processing_pipeline.close()
         self._etc_manager.close()
         self._oracle_connection_manager.close_all()
-        self._replicator.close()
         self._store.close()
         self._logger.info("[App] shutdown complete")
         self._logger.stop()

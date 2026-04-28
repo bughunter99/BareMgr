@@ -73,6 +73,8 @@ class EtcManager:
         self._oracle_dsn = str(oracle_cfg.get("dsn") or collector_oracle_dsn).strip()
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_connection_manager = connection_manager is None
+        self._pool_cfg = (etc_cfg.get("oracle", {}) or {}).get("oracle_pool", {}) or {}
+        self._pool_enabled = bool(self._pool_cfg.get("enabled", False))
 
     def run(self, ctx: dict[str, Any]) -> None:
         if not self.enabled:
@@ -171,11 +173,16 @@ class EtcManager:
 
     def _task_oracle_probe(self, name: str, task: dict[str, Any]) -> int:
         dsn = str(task.get("dsn") or self._oracle_dsn).strip()
-        if not dsn:
+        if not dsn and not self._pool_enabled:
             self._logger.warning("[Etc] task=%s oracle_probe skipped (dsn missing)", name)
             return 0
 
-        conn = self._get_oracle_conn(dsn)
+        if self._pool_enabled:
+            _pool = self._connection_manager.get_session_pool(self._pool_cfg)
+            conn = _pool.acquire()
+        else:
+            _pool = None
+            conn = self._get_oracle_conn(dsn)
         validate_oracle_connection(conn)
         cursor = conn.cursor()
         try:
@@ -184,6 +191,8 @@ class EtcManager:
             return 1
         finally:
             cursor.close()
+            if _pool is not None:
+                _pool.release(conn)
 
     def _get_oracle_conn(self, dsn: str):
         return self._connection_manager.get_connection(dsn, threaded=True)

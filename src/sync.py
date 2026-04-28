@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from .logger import Logger
+from .oracle_connection_manager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
 from .oracle_utils import validate_oracle_connection
 
@@ -80,7 +81,7 @@ class SyncCheckpointStore:
 
 
 class SyncBase:
-    def __init__(self, cfg: dict[str, Any], logger: Logger):
+    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None):
         self._cfg = cfg
         self._logger = logger
 
@@ -116,16 +117,39 @@ class SyncBase:
             sync_cfg.get("checkpoint_db", cfg.get("sqlite", {}).get("path", "data") + "/pipeline/sync_checkpoint.db")
         )
         self._checkpoint = SyncCheckpointStore(checkpoint_path)
+        self._connection_manager = connection_manager or OracleConnectionManager(logger)
+        self._source_pool_cfg = sync_cfg.get("source_pool", {}) or {}
+        self._target_pool_cfg = sync_cfg.get("target_pool", {}) or {}
 
     def _connect(self, dsn: str):
         cx_Oracle = get_cx_oracle()
-
         return cx_Oracle.connect(dsn, threaded=True)
+
+    def _acquire_source_conn(self):
+        if bool(self._source_pool_cfg.get("enabled", False)):
+            pool = self._connection_manager.get_session_pool(self._source_pool_cfg)
+            return pool.acquire(), pool
+        return self._connect(self.source_dsn), None
+
+    def _acquire_target_conn(self):
+        if bool(self._target_pool_cfg.get("enabled", False)):
+            pool = self._connection_manager.get_session_pool(self._target_pool_cfg)
+            return pool.acquire(), pool
+        return self._connect(self.target_dsn), None
+
+    def _release_conn(self, conn, pool) -> None:
+        if pool is not None:
+            pool.release(conn)
+        else:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 class SyncOracleToOracle(SyncBase):
-    def __init__(self, cfg: dict[str, Any], logger: Logger):
-        super().__init__(cfg=cfg, logger=logger)
+    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None):
+        super().__init__(cfg=cfg, logger=logger, connection_manager=connection_manager)
         sync_cfg = cfg.get("pipeline", {}).get("sync", {})
         self._ensure_table = bool(sync_cfg.get("ensure_table", False))
 
@@ -178,10 +202,11 @@ class SyncOracleToOracle(SyncBase):
             self._set_status(running=False, current_table="")
 
     def _estimate_source_count(self, table: str) -> int:
-        if not self.source_dsn:
+        source_pool_enabled = bool(self._source_pool_cfg.get("enabled", False))
+        if not self.source_dsn and not source_pool_enabled:
             return 0
         try:
-            source_conn = self._connect(self.source_dsn)
+            source_conn, source_pool = self._acquire_source_conn()
             validate_oracle_connection(source_conn)
             cur = source_conn.cursor()
             try:
@@ -190,7 +215,7 @@ class SyncOracleToOracle(SyncBase):
                 return int(row[0]) if row else 0
             finally:
                 cur.close()
-                source_conn.close()
+                self._release_conn(source_conn, source_pool)
         except Exception:
             self._logger.exception("[Sync] dry-run count failed table=%s", table)
             return 0
@@ -215,8 +240,8 @@ class SyncOracleToOracle(SyncBase):
 
     def _sync_one_table(self, table: str) -> int:
         self._set_status(current_table=table)
-        source_conn = self._connect(self.source_dsn)
-        target_conn = self._connect(self.target_dsn)
+        source_conn, source_pool = self._acquire_source_conn()
+        target_conn, target_pool = self._acquire_target_conn()
         try:
             validate_oracle_connection(source_conn)
             validate_oracle_connection(target_conn)
@@ -224,8 +249,8 @@ class SyncOracleToOracle(SyncBase):
             self._logger.info("[Sync] table=%s synced_rows=%d", table, synced)
             return synced
         finally:
-            source_conn.close()
-            target_conn.close()
+            self._release_conn(source_conn, source_pool)
+            self._release_conn(target_conn, target_pool)
 
     def _run_sync_tables(self) -> int:
         if self.workers == 1 or len(self.tables) == 1:
@@ -383,9 +408,9 @@ class SyncOracleToOracle(SyncBase):
 
 
 class SyncJobManager:
-    def __init__(self, cfg: dict[str, Any], logger: Logger):
+    def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None):
         self._logger = logger
-        self._syncer = SyncOracleToOracle(cfg=cfg, logger=logger)
+        self._syncer = SyncOracleToOracle(cfg=cfg, logger=logger, connection_manager=connection_manager)
 
     def run(self, ctx: dict[str, Any]) -> None:
         result = self._syncer.run(ctx)

@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from .logger import Logger
+
+if TYPE_CHECKING:
+    from .collector import BaseCollector
+    from .replicator import Replicator
 
 
 class _PeriodicJobRunner:
@@ -105,6 +109,8 @@ class AppOrchestrator:
         processing_callback: Callable[[dict[str, Any]], None],
         sync_callback: Callable[[dict[str, Any]], None],
         etc_callback: Callable[[dict[str, Any]], None] | None = None,
+        collectors: list[BaseCollector] | None = None,
+        replicator: Replicator | None = None,
     ) -> None:
         pipeline_cfg = cfg.get("pipeline", {})
 
@@ -129,7 +135,18 @@ class AppOrchestrator:
                 callback=etc_callback,
             )
 
+        self._collectors: list[BaseCollector] = collectors or []
+        self._replicator: Replicator | None = replicator
+
+    @property
+    def collectors(self) -> list[BaseCollector]:
+        return self._collectors
+
     def start(self) -> None:
+        for c in self._collectors:
+            c.start()
+        if self._replicator:
+            self._replicator.start_subscriber()
         self._processing.start()
         self._sync.start()
         if self._etc:
@@ -140,9 +157,27 @@ class AppOrchestrator:
         self._sync.set_active(is_active)
         if self._etc:
             self._etc.set_active(is_active)
+        for c in self._collectors:
+            c.set_active(is_active)
+        if self._replicator:
+            if is_active:
+                self._replicator.stop_subscriber()
+                self._replicator.start_publisher()
+            else:
+                self._replicator.stop_publisher()
+                self._replicator.start_subscriber()
+
+    def publish(self, table: str, rows: list[dict]) -> None:
+        """Active 상태에서 수집 데이터를 peer로 복제 전송한다."""
+        if self._replicator:
+            self._replicator.publish(table, rows)
 
     def stop(self) -> None:
         self._processing.stop()
         self._sync.stop()
         if self._etc:
             self._etc.stop()
+        for c in self._collectors:
+            c.stop()
+        if self._replicator:
+            self._replicator.close()
