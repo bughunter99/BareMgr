@@ -14,11 +14,22 @@ oracle_jobs.py — OracleCollector가 실행할 수집 잡 코드 정의.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
+from typing import TypedDict
 
 
-PostProcessFn = Callable[[list[dict]], list[dict]]
+class PostProcessContext(TypedDict):
+    job_name: str
+    table: str
+    db_alias: str
+    jid: str
+    collected_at: str
+
+
+PostProcessRowsOnlyFn = Callable[[list[dict]], list[dict]]
+PostProcessWithContextFn = Callable[[list[dict], PostProcessContext], list[dict]]
+PostProcessFn = PostProcessRowsOnlyFn | PostProcessWithContextFn
 
 
 def identity_post_process(rows: list[dict]) -> list[dict]:
@@ -34,6 +45,7 @@ class OracleJob:
     use_last_ts: bool = True
     test_rows: int = 5000
     post_process: PostProcessFn = identity_post_process
+    post_processes: list[PostProcessFn] = field(default_factory=list)
 
 
 # ── 수집 잡 목록 ─────────────────────────────────────────────────────
@@ -41,7 +53,10 @@ class OracleJob:
 # db에는 실행할 DB alias를 넣을 수 있다. (예: DB_MAIN, DB_TARGET)
 # use_last_ts=True 인 잡은 WHERE 조건에 :last_ts 바인드 변수를 사용한다.
 # use_last_ts=False 인 잡은 항상 전체를 조회한다.
-# post_process에 함수명을 넣으면 쿼리 직후 결과를 파이썬 코드로 가공할 수 있다.
+# post_process는 아래 두 형태를 모두 지원한다.
+#   - post_process(rows)
+#   - post_process(rows, context)
+# post_processes에 여러 함수를 넣으면 순차 적용된다.
 
 ORACLE_JOBS: list[OracleJob] = [
     OracleJob(

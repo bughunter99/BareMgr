@@ -210,3 +210,165 @@ def test_oracle_collector_applies_post_process_per_job(tmp_path, monkeypatch) ->
         collector.stop()
         store.close()
         log.stop()
+
+
+def test_oracle_collector_applies_post_process_with_context(tmp_path, monkeypatch) -> None:
+    received_context: dict = {}
+
+    class FakeCursor:
+        description = [("SEQ",), ("LABEL",)]
+
+        def execute(self, sql, params=None):
+            return None
+
+        def fetchone(self):
+            return ("2026-04-28",)
+
+        def fetchall(self):
+            return [("1", "raw")]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def __init__(self, dsn: str) -> None:
+            self._dsn = dsn
+
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    fake_module = SimpleNamespace(connect=lambda dsn, threaded=True: FakeConnection(dsn))
+    monkeypatch.setitem(sys.modules, "cx_Oracle", fake_module)
+
+    def post_process(rows: list[dict], context: dict) -> list[dict]:
+        received_context.update(context)
+        out: list[dict] = []
+        for row in rows:
+            new_row = dict(row)
+            new_row["label"] = f"processed:{context['job_name']}:{context['db_alias']}"
+            out.append(new_row)
+        return out
+
+    store = Store(str(tmp_path / "app4"))
+    log = Logger(name="test.oracle.collector.post.ctx", log_base=str(tmp_path / "logs" / "oracle-collector-post-ctx"), console=False)
+
+    collector = OracleCollector(
+        cfg={"db": "DB_MAIN"},
+        store=store,
+        logger=log,
+        db_registry={
+            "DB_MAIN": {"user": "u1", "password": "p1", "tns": "main:1521/ORCL"},
+        },
+    )
+    monkeypatch.setattr(
+        oracle_collector_module,
+        "ORACLE_JOBS",
+        [
+            OracleJob(
+                name="job_post_ctx",
+                table="t_post_ctx",
+                sql="SELECT 1 AS seq, 'raw' AS label FROM dual",
+                db="DB_MAIN",
+                use_last_ts=False,
+                post_process=post_process,
+            )
+        ],
+    )
+    collector._jobs = list(oracle_collector_module.ORACLE_JOBS)
+    collector._last_ts = {job.name: "1970-01-01 00:00:00" for job in collector._jobs}
+
+    try:
+        results = collector.collect()
+        assert len(results) == 1
+        table, rows, jid = results[0]
+        assert table == "t_post_ctx"
+        assert rows[0]["label"].startswith("processed:job_post_ctx:DB_MAIN")
+        assert received_context["job_name"] == "job_post_ctx"
+        assert received_context["table"] == "t_post_ctx"
+        assert received_context["db_alias"] == "DB_MAIN"
+        assert received_context["jid"] == jid
+        assert received_context["collected_at"]
+    finally:
+        collector.stop()
+        store.close()
+        log.stop()
+
+
+def test_oracle_collector_applies_multiple_post_processes_in_order(tmp_path, monkeypatch) -> None:
+    class FakeCursor:
+        description = [("SEQ",), ("LABEL",)]
+
+        def execute(self, sql, params=None):
+            return None
+
+        def fetchone(self):
+            return ("2026-04-28",)
+
+        def fetchall(self):
+            return [("1", "raw")]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    fake_module = SimpleNamespace(connect=lambda dsn, threaded=True: FakeConnection(dsn))
+    monkeypatch.setitem(sys.modules, "cx_Oracle", fake_module)
+
+    def step1(rows: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for row in rows:
+            new_row = dict(row)
+            new_row["label"] = "step1"
+            out.append(new_row)
+        return out
+
+    def step2(rows: list[dict], context: dict) -> list[dict]:
+        out: list[dict] = []
+        for row in rows:
+            new_row = dict(row)
+            new_row["label"] = f"{new_row['label']}:{context['job_name']}"
+            out.append(new_row)
+        return out
+
+    store = Store(str(tmp_path / "app5"))
+    log = Logger(name="test.oracle.collector.post.chain", log_base=str(tmp_path / "logs" / "oracle-collector-post-chain"), console=False)
+
+    collector = OracleCollector(
+        cfg={"dsn": "dsn"},
+        store=store,
+        logger=log,
+    )
+    monkeypatch.setattr(
+        oracle_collector_module,
+        "ORACLE_JOBS",
+        [
+            OracleJob(
+                name="job_chain",
+                table="t_chain",
+                sql="SELECT 1 AS seq, 'raw' AS label FROM dual",
+                use_last_ts=False,
+                post_processes=[step1, step2],
+            )
+        ],
+    )
+    collector._jobs = list(oracle_collector_module.ORACLE_JOBS)
+    collector._last_ts = {job.name: "1970-01-01 00:00:00" for job in collector._jobs}
+
+    try:
+        results = collector.collect()
+        assert len(results) == 1
+        _table, rows, _jid = results[0]
+        assert rows[0]["label"] == "step1:job_chain"
+    finally:
+        collector.stop()
+        store.close()
+        log.stop()

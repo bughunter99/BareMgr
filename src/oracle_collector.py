@@ -11,6 +11,7 @@ oracle_collector.py — Oracle DB 주기 수집기.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import inspect
 import time
 from typing import Any
 from typing import TYPE_CHECKING
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING
 from .collector import BaseCollector
 from .db_registry import resolve_dsn, resolve_pool_cfg
 from .oracle_connection_manager import OracleConnectionManager
-from .oracle_jobs import ORACLE_JOBS, OracleJob
+from .oracle_jobs import ORACLE_JOBS, OracleJob, PostProcessContext
 from .oracle_utils import makeDictFactory, validate_oracle_connection
 
 if TYPE_CHECKING:
@@ -102,6 +103,43 @@ class OracleCollector(BaseCollector):
 
         return dsn, pool_cfg, pool_enabled, job_db_alias
 
+    def _apply_post_process(
+        self,
+        *,
+        job: OracleJob,
+        rows: list[dict],
+        job_db_alias: str,
+        jid: str,
+        collected_at: str,
+    ) -> list[dict]:
+        context: PostProcessContext = {
+            "job_name": job.name,
+            "table": job.table,
+            "db_alias": job_db_alias,
+            "jid": jid,
+            "collected_at": collected_at,
+        }
+
+        def _run_one(fn, in_rows: list[dict]) -> list[dict]:
+            try:
+                arg_count = len(inspect.signature(fn).parameters)
+            except (TypeError, ValueError):
+                arg_count = 1
+
+            if arg_count >= 2:
+                out_rows = fn(in_rows, context)
+            else:
+                out_rows = fn(in_rows)
+
+            if out_rows is None:
+                raise ValueError(f"post_process must return list[dict], got None for job={job.name}")
+            return out_rows
+
+        processed = _run_one(job.post_process, rows)
+        for fn in job.post_processes:
+            processed = _run_one(fn, processed)
+        return processed
+
     # ── 수집 ────────────────────────────────────────────────────────
     def collect(self) -> list[tuple[str, list[dict], str]]:
         if self._test_mode:
@@ -133,13 +171,18 @@ class OracleCollector(BaseCollector):
                         cursor.execute(job.sql)
                     cursor.rowfactory = makeDictFactory(cursor)
                     rows = list(cursor.fetchall())
-                    rows = job.post_process(rows)
+                    collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                    rows = self._apply_post_process(
+                        job=job,
+                        rows=rows,
+                        job_db_alias=job_db_alias,
+                        jid=jid,
+                        collected_at=collected_at,
+                    )
                     elapsed = time.perf_counter() - started_at
                     if rows:
                         results.append((job.table, rows, jid))
-                        self._last_ts[job.name] = datetime.now(timezone.utc).strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        )
+                        self._last_ts[job.name] = collected_at
                     self.logger.info(
                         "[OracleCollector] job=%s db=%s table=%s rows=%d elapsed=%.3fs",
                         job.name,
