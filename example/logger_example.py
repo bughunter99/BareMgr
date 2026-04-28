@@ -18,14 +18,14 @@ import threading
 import time
 import random
 
-from .logger import Logger, init_worker_logger
+from src.logger import Logger, init_worker_logger
 
 
 LOG_BASE = "logs/app"   # 파일명: logs/app.{YYYYMMDDHH}
 
 
 # ══════════════════════════════════════════════════════════════════
-# 예제 1 : 멀티스레딩 – Logger 인스턴스를 여러 스레드가 공유
+# 예제 1 : 멀티스레딩 - Logger 인스턴스를 여러 스레드가 공유
 # ══════════════════════════════════════════════════════════════════
 def thread_worker(worker_id: int, logger: Logger, iterations: int = 5) -> None:
     for i in range(iterations):
@@ -53,18 +53,17 @@ def demo_multithreading() -> None:
 
     logger.info("모든 스레드 완료")
     logger.stop()
-    print(f"  → 로그 파일: {LOG_BASE}.{{YYYYMMDDHH}}")
+    print(f"  -> 로그 파일: {LOG_BASE}.{{YYYYMMDDHH}}")
 
 
 # ══════════════════════════════════════════════════════════════════
-# 예제 2 : 멀티프로세싱 – Pool + QueueHandler
+# 예제 2 : 멀티프로세싱 - Pool + QueueHandler
 # ══════════════════════════════════════════════════════════════════
 def process_worker(task_id: int) -> int:
     """Pool 워커: init_worker_logger로 루트 logger에 QueueHandler 등록"""
     log = logging.getLogger("mp_demo")
     log.info(f"[Process Worker {task_id}] 작업 시작 (PID={multiprocessing.current_process().pid})")
 
-    # 실제 작업 시뮬레이션
     time.sleep(random.uniform(0.05, 0.2))
     result = task_id * task_id
 
@@ -77,7 +76,6 @@ def demo_multiprocessing() -> None:
     print("  예제 2 : 멀티프로세싱 (Pool)")
     print("=" * 60)
 
-    # Logger 생성 시 리스너 스레드가 자동 시작된다.
     logger = Logger(name="mp_demo", log_base=LOG_BASE, level=logging.DEBUG)
 
     try:
@@ -90,7 +88,7 @@ def demo_multiprocessing() -> None:
             results = pool.map(process_worker, tasks)
 
         logger.info(f"모든 프로세스 완료. 결과 합계={sum(results)}")
-        print("  → 결과:", results)
+        print("  -> 결과:", results)
     finally:
         logger.stop()
 
@@ -120,7 +118,6 @@ def demo_mixed() -> None:
     print("  예제 3 : 프로세스 + 스레드 혼합 (컨텍스트 매니저)")
     print("=" * 60)
 
-    # with 블록 탈출 시 stop()이 자동 호출된다.
     with Logger(name="mixed", log_base=LOG_BASE, level=logging.DEBUG) as logger:
         processes = [
             multiprocessing.Process(
@@ -138,11 +135,11 @@ def demo_mixed() -> None:
 
         logger.info("예제 3 완료")
 
-    print("  → 컨텍스트 매니저가 리스너를 자동 정리했습니다.")
+    print("  -> 컨텍스트 매니저가 리스너를 자동 정리했습니다.")
 
 
 def _mixed_worker_entry(task_id: int, queue: multiprocessing.Queue) -> None:
-    """multiprocessing.Process target – 최상위 함수여야 pickle 가능"""
+    """multiprocessing.Process target - 최상위 함수여야 pickle 가능"""
     init_worker_logger(queue, name="mixed")
     mixed_process_task(task_id, queue)
 
@@ -169,15 +166,10 @@ def demo_exception_logging() -> None:
         logger.exception("존재하지 않는 키 접근!")
 
     logger.stop()
-    print("  → 예외 traceback이 로그에 기록되었습니다.")
+    print("  -> 예외 traceback이 로그에 기록되었습니다.")
 
 
-# ══════════════════════════════════════════════════════════════════
-# 메인
-# ══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    # Windows는 fork를 지원하지 않으므로 플랫폼 기본 방식 사용.
-    # 필요 시에만 start method를 설정한다.
     multiprocessing.freeze_support()
     if multiprocessing.get_start_method(allow_none=True) is None:
         methods = multiprocessing.get_all_start_methods()

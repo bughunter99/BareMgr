@@ -20,7 +20,7 @@ chmod +x ProdBaremgrStart ProdBaremgrStop
 ```
 
 - `ProdBaremgrStart`는 `.baremgr/run_*.state`에 `pid`, `config`, `console log`를 기록합니다.
-- `ProdBaremgrStop`는 인자를 주지 않으면 마지막으로 시작한 config의 state를 읽어서 종료합니다.
+- `ProdBaremgrStop`는 인자를 주지 않으면 마지막으로 시작한 config를 사용하고, 내부에서 `src.failover_stop_db` + `src.failover_stop_zmq`를 config 기반으로 호출합니다.
 - 특정 config 인스턴스를 내리려면 같은 config 파일 경로를 인자로 넘기면 됩니다.
 
 ## 설정 파일 형식 (YAML)
@@ -241,19 +241,23 @@ python main.py --config config_app_node3.yml
 
 ## Active 종료 테스트
 
-Active 노드의 failover 포트로 stop 명령을 보내면 graceful shutdown됩니다.
+config만 전달해서 backend별 stop 명령을 보낼 수 있습니다.
 
 ```bash
-python -m src.failover_zmq_stop 127.0.0.1:5555
+python -m src.failover_stop_zmq config_app_node1.yml
 ```
 
-DB failover 사용 시 stop 테스트:
+DB failover stop 테스트:
 
 ```bash
-python -m src.failover_db_stop "user/password@192.168.1.100:1521/ORCL" node1
+python -m src.failover_stop_db config_app_node1.yml
 ```
 
-컬럼명을 커스터마이징했다면 옵션으로 맞출 수 있습니다.
+운영에서는 보통 아래처럼 Stop 스크립트 하나만 호출하면 됩니다.
+
+```bash
+./ProdBaremgrStop config_app_node1.yml
+```
 
 수초 내 Standby 노드 중 최고 가중치 노드가 Active로 승격됩니다.
 

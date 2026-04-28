@@ -6,13 +6,11 @@
 2) 여러 터미널에서 각 노드를 실행
 """
 
-from .failover_zmq import FailoverNode
-from .logger import Logger
+from src.failover_zmq import FailoverNode
+from src.logger import Logger
 
 
 def main() -> None:
-    # 공용 로거를 직접 주입할 수도 있다.
-    # 파일: logs/failover_demo.{YYYYMMDDHH}
     logger = Logger(name="failover-demo", log_base="logs/failover_demo")
 
     node = FailoverNode(config_file="config.json", logger=logger)
