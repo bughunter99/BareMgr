@@ -6,11 +6,11 @@ import time
 
 import zmq
 
-from .failover import Failovernode
+from .failover import FailoverNode
 from .logger import Logger
 
 
-class FailoverNode_zmq(Failovernode):
+class FailoverNodeZmq(FailoverNode):
     def __init__(self, config_file: str, logger: Logger | None = None):
         super().__init__(config_file=config_file, logger=logger)
         failover_cfg = self.config.get("failover", {})
@@ -172,8 +172,8 @@ def send_stop(endpoint: str, timeout_ms: int = 3000) -> dict:
 
 
 if __name__ == "__main__":
-    node = FailoverNode_zmq("config.json")
+    node = FailoverNodeZmq("config.json")
     node.start()
 
 
-FailoverNode = FailoverNode_zmq
+FailoverNode = FailoverNodeZmq

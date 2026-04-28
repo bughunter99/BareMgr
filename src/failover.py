@@ -9,7 +9,7 @@ from .config_loader import load_config
 from .logger import Logger
 
 
-class Failovernode(ABC):
+class FailoverNode(ABC):
     def __init__(self, config_file: str, logger: Logger | None = None):
         self.config = load_config(config_file)
         failover_cfg = self.config.get("failover", {})

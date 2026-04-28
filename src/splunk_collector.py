@@ -2,9 +2,8 @@
 """
 splunk_collector.py — Splunk 주기 수집기.
 
-· config["collectors"]["splunk"] 기준으로 동작한다.
 · splunklib(splunk-sdk) 패키지를 사용한다.
-· jobs 마다 SPL 쿼리를 실행해 결과를 SQLite에 저장한다.
+· 수집 잡은 splunk_jobs.py의 SPLUNK_JOBS에 코드로 정의한다.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ import time
 from typing import TYPE_CHECKING
 
 from .collector import BaseCollector
+from .splunk_jobs import SPLUNK_JOBS, SplunkJob
 from .splunk_search import SplunkSearch, configure_splunk_search
 
 if TYPE_CHECKING:
@@ -22,26 +22,6 @@ if TYPE_CHECKING:
 
 
 class SplunkCollector(BaseCollector):
-    """
-    config 예시:
-        "splunk": {
-            "enabled": true,
-            "host": "splunk.internal",
-            "port": 8089,
-            "username": "admin",
-            "password": "changeme",
-            "scheme": "https",
-            "interval_sec": 120,
-            "jobs": [
-                {
-                    "name": "error_events",
-                    "query": "search index=main level=ERROR earliest=-2m latest=now | table _time, host, message",
-                    "table": "splunk_errors"
-                }
-            ]
-        }
-    """
-
     def __init__(
         self,
         cfg: dict,
@@ -65,7 +45,7 @@ class SplunkCollector(BaseCollector):
         self._credential_key: str = str(cfg.get("credential_key", "")).strip()
         self._splunk_token: str = str(cfg.get("splunk_token", "")).strip()
         self._timeout_sec: float = float(cfg.get("timeout_sec", 60.0))
-        self._jobs: list[dict] = cfg.get("jobs", [])
+        self._jobs: list[SplunkJob] = list(SPLUNK_JOBS)
         self._test_cfg: dict = cfg.get("test", {})
         self._test_mode: bool = cfg.get("test_mode", False) or self._test_cfg.get("enabled", False)
         self._test_rows: int = int(self._test_cfg.get("rows", 10000))
@@ -141,34 +121,24 @@ class SplunkCollector(BaseCollector):
         collected: list[tuple[str, list[dict], str]] = []
 
         for job in self._jobs:
-            name: str = job["name"]
-            query: str = job["query"]
-            table: str = job["table"]
             jid = self.logger.new_jid(prefix="SPL")
 
             with self.logger.job_context(jid=jid, prefix="SPL"):
                 try:
                     started_at = time.perf_counter()
-                    rows = self._run_search(service, query, name)
+                    rows = self._run_search(service, job.query, job.name)
                     elapsed = time.perf_counter() - started_at
                     if rows:
-                        collected.append((table, rows, jid))
-                        self.logger.info(
-                            "[SplunkCollector] ACTIVE selected job=%s table=%s rows=%d elapsed=%.3fs",
-                            name,
-                            table,
-                            len(rows),
-                            elapsed,
-                        )
-                    else:
-                        self.logger.info(
-                            "[SplunkCollector] ACTIVE selected job=%s table=%s rows=0 elapsed=%.3fs",
-                            name,
-                            table,
-                            elapsed,
-                        )
+                        collected.append((job.table, rows, jid))
+                    self.logger.info(
+                        "[SplunkCollector] job=%s table=%s rows=%d elapsed=%.3fs",
+                        job.name,
+                        job.table,
+                        len(rows),
+                        elapsed,
+                    )
                 except Exception:
-                    self.logger.exception("[SplunkCollector] job=%s error", name)
+                    self.logger.exception("[SplunkCollector] job=%s error", job.name)
                     self._close_service()
                     raise
 
@@ -179,39 +149,35 @@ class SplunkCollector(BaseCollector):
             self.logger.debug("[SplunkCollector:test] already emitted, skip")
             return []
 
-        jobs = self._jobs or [{"name": "splunk_test", "table": "splunk_test_data"}]
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         batch_no = self._test_batch_no
         self._test_batch_no += 1
 
         results: list[tuple[str, list[dict], str]] = []
-        for idx, job in enumerate(jobs):
-            table = job.get("table", job.get("name", f"splunk_test_{idx}"))
-            name = job.get("name", f"job_{idx}")
-            rows_per_job = max(1, int(job.get("test_rows", self._test_rows)))
+        for job in self._jobs:
+            rows_count = job.test_rows
             jid = self.logger.new_jid(prefix="SPL")
             with self.logger.job_context(jid=jid, prefix="SPL"):
                 started_at = time.perf_counter()
-                rows = []
-                for i in range(rows_per_job):
-                    rows.append(
-                        {
-                            "event_id": f"{name}-batch{batch_no}-{i}",
-                            "job": name,
-                            "batch_no": str(batch_no),
-                            "host": f"host-{i % 16}",
-                            "message": f"synthetic splunk event {i}",
-                            "severity": ["INFO", "WARN", "ERROR"][i % 3],
-                            "updated_at": now,
-                            "source": "splunk_test_mode",
-                        }
-                    )
-                results.append((table, rows, jid))
+                rows = [
+                    {
+                        "event_id": f"{job.name}-batch{batch_no}-{i}",
+                        "job": job.name,
+                        "batch_no": str(batch_no),
+                        "host": f"host-{i % 16}",
+                        "message": f"synthetic splunk event {i}",
+                        "severity": ["INFO", "WARN", "ERROR"][i % 3],
+                        "updated_at": now,
+                        "source": "splunk_test_mode",
+                    }
+                    for i in range(rows_count)
+                ]
+                results.append((job.table, rows, jid))
                 elapsed = time.perf_counter() - started_at
                 self.logger.info(
-                    "[SplunkCollector:test] ACTIVE selected job=%s table=%s rows=%d batch=%d elapsed=%.3fs",
-                    name,
-                    table,
+                    "[SplunkCollector:test] job=%s table=%s rows=%d batch=%d elapsed=%.3fs",
+                    job.name,
+                    job.table,
                     len(rows),
                     batch_no,
                     elapsed,

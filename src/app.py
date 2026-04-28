@@ -30,9 +30,9 @@ from .collector import BaseCollector
 from .config_loader import load_config
 from .db_registry import build_registry
 from .etc import EtcManager
-from .failover import Failovernode
-from .failover_db import FailoverNode_db
-from .failover_zmq import FailoverNode_zmq
+from .failover import FailoverNode
+from .failover_db import FailoverNodeDb
+from .failover_zmq import FailoverNodeZmq
 from .logger import Logger
 from .oracle_connection_manager import OracleConnectionManager
 from .oracle_collector import OracleCollector
@@ -86,7 +86,7 @@ class App:
         _collectors: list[BaseCollector] = self._build_collectors()
 
         # ── Failover 노드 ────────────────────────────────────────────
-        self._node: Failovernode = self._build_failover_node(config_file)
+        self._node: FailoverNode = self._build_failover_node(config_file)
         self._node.set_status_provider(self._build_failover_runtime_status)
 
         # ── 주기 작업 오케스트레이터 ─────────────────────────────────
@@ -136,14 +136,14 @@ class App:
 
         return collectors
 
-    def _build_failover_node(self, config_file: str) -> Failovernode:
+    def _build_failover_node(self, config_file: str) -> FailoverNode:
         failover_cfg = self._cfg.get("failover", {})
         backend = str(failover_cfg.get("backend", "zmq")).strip().lower()
 
         if backend == "zmq":
-            return FailoverNode_zmq(config_file=config_file, logger=self._logger)
+            return FailoverNodeZmq(config_file=config_file, logger=self._logger)
         if backend == "db":
-            return FailoverNode_db(config_file=config_file, logger=self._logger)
+            return FailoverNodeDb(config_file=config_file, logger=self._logger)
 
         raise ValueError(f"Unsupported failover.backend: {backend}")
 

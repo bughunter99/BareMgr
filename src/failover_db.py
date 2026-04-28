@@ -6,12 +6,12 @@ import re
 import threading
 import time
 
-from .failover import Failovernode
+from .failover import FailoverNode
 from .logger import Logger
 from .oracle_driver import get_cx_oracle
 
 
-class FailoverNode_db(Failovernode):
+class FailoverNodeDb(FailoverNode):
     def __init__(self, config_file: str, logger: Logger | None = None):
         super().__init__(config_file=config_file, logger=logger)
         failover_cfg = self.config.get("failover", {})
@@ -320,7 +320,7 @@ class FailoverNode_db(Failovernode):
             cursor.close()
 
 
-FailoverNode = FailoverNode_db
+FailoverNode = FailoverNodeDb
 
 
 def send_stop_db(

@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from src.app import App
-from src.failover_db import FailoverNode_db
-from src.failover_zmq import FailoverNode_zmq
+from src.failover_db import FailoverNodeDb
+from src.failover_zmq import FailoverNodeZmq
 
 
 def _base_cfg(backend: str, base_dir: Path) -> str:
@@ -45,7 +45,7 @@ def test_app_selects_zmq_backend(tmp_path: Path) -> None:
 
     app = App(config_file=str(cfg_file))
     try:
-        assert isinstance(app._node, FailoverNode_zmq)
+        assert isinstance(app._node, FailoverNodeZmq)
     finally:
         app.stop()
 
@@ -56,7 +56,7 @@ def test_app_selects_db_backend(tmp_path: Path) -> None:
 
     app = App(config_file=str(cfg_file))
     try:
-        assert isinstance(app._node, FailoverNode_db)
+        assert isinstance(app._node, FailoverNodeDb)
     finally:
         app.stop()
 
