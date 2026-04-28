@@ -1,6 +1,5 @@
 pyzmq>=25.0.0
 oracledb>=2.5.0
-cx_Oracle>=8.3.0
 splunk-sdk>=1.7.4
 PyYAML>=6.0
 pytest>=8.0.0

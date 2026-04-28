@@ -10,6 +10,46 @@ from .oracle_connection_manager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
 
 
+class OracleSessionPool:
+    def __init__(
+        self,
+        cfg: dict[str, Any],
+        logger: Logger,
+        connection_manager: OracleConnectionManager | None = None,
+    ) -> None:
+        self._cfg = cfg or {}
+        self._logger = logger
+        self.enabled = bool(self._cfg.get("enabled", False))
+        self._connection_manager = connection_manager or OracleConnectionManager(logger)
+        self._owns_connection_manager = connection_manager is None
+
+    def fetch_many(
+        self,
+        *,
+        sql: str,
+        params: dict[str, Any] | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+
+        normalized_sql = str(sql).strip()
+        if not normalized_sql:
+            return []
+
+        rows = self._connection_manager.fetch_many_from_pool(
+            self._cfg,
+            sql=normalized_sql,
+            params=params or {},
+            limit=max(1, int(limit)),
+        )
+        return rows
+
+    def close(self) -> None:
+        if self._owns_connection_manager:
+            self._connection_manager.close_all()
+
+
 class OracleResultWriter:
     def __init__(
         self,
