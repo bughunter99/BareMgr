@@ -4,14 +4,13 @@ oracle_collector.py — Oracle DB 주기 수집기.
 
 · 수집 잡은 oracle_jobs.py의 ORACLE_JOBS에 코드로 정의한다.
 · 각 잡은 db alias를 지정해 서로 다른 DB에서 조회할 수 있다.
-· 각 잡은 post_process 함수로 쿼리 직후 결과를 후처리할 수 있다.
-· use_last_ts=True 인 잡은 :last_ts 바인드 변수로 증분 수집한다.
+· 각 잡은 query(config, cursor) 함수에서 SQL 실행/바인딩/결과 가공을 처리한다.
+· 한 잡에서 예외가 나도 로그만 남기고 다음 잡을 계속 처리한다.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import inspect
 import time
 from typing import Any
 from typing import TYPE_CHECKING
@@ -19,8 +18,8 @@ from typing import TYPE_CHECKING
 from .collector import BaseCollector
 from .db_registry import resolve_dsn, resolve_pool_cfg
 from .oracle_connection_manager import OracleConnectionManager
-from .oracle_jobs import ORACLE_JOBS, OracleJob, PostProcessContext
-from .oracle_utils import makeDictFactory, validate_oracle_connection
+from .oracle_jobs import ORACLE_JOBS, OracleJob
+from .oracle_utils import validate_oracle_connection
 
 if TYPE_CHECKING:
     from .store import Store
@@ -104,43 +103,6 @@ class OracleCollector(BaseCollector):
 
         return dsn, pool_cfg, pool_enabled, job_db_alias
 
-    def _apply_post_process(
-        self,
-        *,
-        job: OracleJob,
-        rows: list[dict],
-        job_db_alias: str,
-        jid: str,
-        collected_at: str,
-    ) -> list[dict]:
-        context: PostProcessContext = {
-            "job_name": job.name,
-            "table": job.table,
-            "db_alias": job_db_alias,
-            "jid": jid,
-            "collected_at": collected_at,
-        }
-
-        def _run_one(fn, in_rows: list[dict]) -> list[dict]:
-            try:
-                arg_count = len(inspect.signature(fn).parameters)
-            except (TypeError, ValueError):
-                arg_count = 1
-
-            if arg_count >= 2:
-                out_rows = fn(in_rows, context)
-            else:
-                out_rows = fn(in_rows)
-
-            if out_rows is None:
-                raise ValueError(f"post_process must return list[dict], got None for job={job.name}")
-            return out_rows
-
-        processed = _run_one(job.post_process, rows)
-        for fn in job.post_processes:
-            processed = _run_one(fn, processed)
-        return processed
-
     # ── 수집 ────────────────────────────────────────────────────────
     def collect(self) -> list[tuple[str, list[dict], str]]:
         if self._test_mode:
@@ -152,6 +114,7 @@ class OracleCollector(BaseCollector):
             jid = self.logger.new_jid(prefix="ORA")
             with self.logger.job_context(jid=jid, prefix="ORA"):
                 dsn = ""
+                job_db_alias = ""
                 conn = None
                 _pool = None
                 cursor = None
@@ -166,21 +129,10 @@ class OracleCollector(BaseCollector):
                     validate_oracle_connection(conn)
                     cursor = conn.cursor()
                     started_at = time.perf_counter()
-                    sql = job.makeQuery(self._cfg)
-                    if job.use_last_ts:
-                        cursor.execute(sql, {"last_ts": self._last_ts[job.name]})
-                    else:
-                        cursor.execute(sql)
-                    cursor.rowfactory = makeDictFactory(cursor)
-                    rows = list(cursor.fetchall())
+                    runtime_cfg = dict(self._cfg)
+                    runtime_cfg["_last_ts"] = self._last_ts[job.name]
+                    rows = job.query(runtime_cfg, cursor)
                     collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                    rows = self._apply_post_process(
-                        job=job,
-                        rows=rows,
-                        job_db_alias=job_db_alias,
-                        jid=jid,
-                        collected_at=collected_at,
-                    )
                     elapsed = time.perf_counter() - started_at
                     if rows:
                         results.append((job.table, rows, jid))
@@ -195,8 +147,13 @@ class OracleCollector(BaseCollector):
                     )
                 except Exception:
                     failed = True
-                    self.logger.exception("[OracleCollector] job=%s query error", job.name)
-                    raise
+                    self.logger.exception(
+                        "[OracleCollector] job=%s db=%s table=%s query error; continue",
+                        job.name,
+                        job_db_alias or "<default>",
+                        job.table,
+                    )
+                    continue
                 finally:
                     if cursor is not None:
                         try:

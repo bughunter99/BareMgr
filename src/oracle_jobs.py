@@ -3,58 +3,36 @@
 oracle_jobs.py — OracleCollector가 실행할 수집 잡 코드 정의.
 
 각 OracleJob 필드:
-    name        : 잡 식별자 (로그·체크포인트에 사용)
-    table       : SQLite에 저장할 테이블명
-    sql         : 실행할 SELECT SQL
-    db          : 실행할 DB alias (예: DB_MAIN, DB_TARGET). 비우면 collector 기본 DB 사용
-    use_last_ts : True이면 :last_ts 바인드 변수를 쿼리에 전달한다
-    test_rows   : 테스트 모드에서 생성할 더미 행 수
-    post_process: 쿼리 결과 행(list[dict])을 후처리하는 함수
+    name      : 잡 식별자 (로그·체크포인트에 사용)
+    table     : SQLite에 저장할 테이블명
+    db        : 실행할 DB alias (예: DB_MAIN, DB_TARGET). 비우면 collector 기본 DB 사용
+    test_rows : 테스트 모드에서 생성할 더미 행 수
+
+각 잡은 query(config, cursor) 함수를 구현해 직접 SQL 실행 + 파라미터 바인딩 +
+결과(list[dict]) 반환을 담당한다.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
-from typing import Callable
-from typing import TypedDict
 
-
-class PostProcessContext(TypedDict):
-    job_name: str
-    table: str
-    db_alias: str
-    jid: str
-    collected_at: str
-
-
-PostProcessRowsOnlyFn = Callable[[list[dict]], list[dict]]
-PostProcessWithContextFn = Callable[[list[dict], PostProcessContext], list[dict]]
-PostProcessFn = PostProcessRowsOnlyFn | PostProcessWithContextFn
-
-
-def identity_post_process(rows: list[dict]) -> list[dict]:
-    return rows
+from .oracle_utils import makeDictFactory
 
 
 @dataclass
 class OracleJob:
     name: str
     table: str
-    sql: str
     db: str = ""
-    use_last_ts: bool = True
     test_rows: int = 5000
-    post_process: PostProcessFn = identity_post_process
-    post_processes: list[PostProcessFn] = field(default_factory=list)
 
-    def makeQuery(self, cfg: dict[str, Any]) -> str:
-        """collector config를 받아 실행할 SQL을 동적으로 생성한다."""
-        return self.sql
+    def query(self, cfg: dict[str, Any], cursor) -> list[dict]:
+        raise NotImplementedError
 
 
 class OracleJob1(OracleJob):
-    SQL = """
+    _SQL = """
         SELECT
             1 AS seq,
             'job1' AS label,
@@ -66,36 +44,22 @@ class OracleJob1(OracleJob):
         super().__init__(
             name="job1",
             table="job1_results",
-            sql=self.SQL,
             db="DB_MAIN",
-            use_last_ts=False,
             test_rows=5000,
-            post_process=self.post_process,
         )
 
-    def makeQuery(self, cfg: dict[str, Any]) -> str:
+    def query(self, cfg: dict[str, Any], cursor) -> list[dict]:
+        sql = self._SQL
         cond = str((cfg.get("query_filters", {}) or {}).get("job1", "")).strip()
-        if not cond:
-            return self.sql
-        return f"""
-            SELECT *
-            FROM ({self.sql})
-            WHERE {cond}
-        """
-
-    @staticmethod
-    def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
-        out: list[dict] = []
-        for row in rows:
-            item = dict(row)
-            item["job"] = context["job_name"]
-            item["db"] = context["db_alias"]
-            out.append(item)
-        return out
+        if cond:
+            sql = f"SELECT * FROM ({self._SQL}) WHERE {cond}"
+        cursor.execute(sql)
+        cursor.rowfactory = makeDictFactory(cursor)
+        return list(cursor.fetchall())
 
 
 class OracleJob2(OracleJob):
-    SQL = """
+    _SQL = """
         SELECT
             2 AS seq,
             'job2' AS label,
@@ -107,37 +71,29 @@ class OracleJob2(OracleJob):
         super().__init__(
             name="job2",
             table="job2_results",
-            sql=self.SQL,
             db="DB_TARGET",
-            use_last_ts=False,
             test_rows=3000,
-            post_process=self.post_process,
         )
 
-    def makeQuery(self, cfg: dict[str, Any]) -> str:
+    def query(self, cfg: dict[str, Any], cursor) -> list[dict]:
+        sql = self._SQL
         cond = str((cfg.get("query_filters", {}) or {}).get("job2", "")).strip()
-        if not cond:
-            return self.sql
-        return f"""
-            SELECT *
-            FROM ({self.sql})
-            WHERE {cond}
-        """
-
-    @staticmethod
-    def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
+        if cond:
+            sql = f"SELECT * FROM ({self._SQL}) WHERE {cond}"
+        cursor.execute(sql)
+        cursor.rowfactory = makeDictFactory(cursor)
+        rows = list(cursor.fetchall())
         out: list[dict] = []
         for row in rows:
             item = dict(row)
             tags = str(item.get("raw_tags", "")).split("|")
             item["tags"] = [t for t in tags if t]
-            item["jid"] = context["jid"]
             out.append(item)
         return out
 
 
 class OracleJob3(OracleJob):
-    SQL = """
+    _SQL = """
         SELECT
             3 AS seq,
             'job3' AS label,
@@ -150,25 +106,18 @@ class OracleJob3(OracleJob):
         super().__init__(
             name="job3",
             table="job3_results",
-            sql=self.SQL,
             db="DB_MAIN",
-            use_last_ts=False,
             test_rows=4000,
-            post_process=self.post_process,
         )
 
-    def makeQuery(self, cfg: dict[str, Any]) -> str:
+    def query(self, cfg: dict[str, Any], cursor) -> list[dict]:
+        sql = self._SQL
         cond = str((cfg.get("query_filters", {}) or {}).get("job3", "")).strip()
-        if not cond:
-            return self.sql
-        return f"""
-            SELECT *
-            FROM ({self.sql})
-            WHERE {cond}
-        """
-
-    @staticmethod
-    def post_process(rows: list[dict]) -> list[dict]:
+        if cond:
+            sql = f"SELECT * FROM ({self._SQL}) WHERE {cond}"
+        cursor.execute(sql)
+        cursor.rowfactory = makeDictFactory(cursor)
+        rows = list(cursor.fetchall())
         out: list[dict] = []
         for row in rows:
             item = dict(row)
@@ -181,7 +130,7 @@ class OracleJob3(OracleJob):
 
 
 class OracleJob4(OracleJob):
-    SQL = """
+    _SQL = """
         SELECT
             4 AS seq,
             'job4' AS label,
@@ -193,25 +142,18 @@ class OracleJob4(OracleJob):
         super().__init__(
             name="job4",
             table="job4_results",
-            sql=self.SQL,
             db="DB_TARGET",
-            use_last_ts=False,
             test_rows=2000,
-            post_process=self.post_process,
         )
 
-    def makeQuery(self, cfg: dict[str, Any]) -> str:
+    def query(self, cfg: dict[str, Any], cursor) -> list[dict]:
+        sql = self._SQL
         cond = str((cfg.get("query_filters", {}) or {}).get("job4", "")).strip()
-        if not cond:
-            return self.sql
-        return f"""
-            SELECT *
-            FROM ({self.sql})
-            WHERE {cond}
-        """
-
-    @staticmethod
-    def post_process(rows: list[dict]) -> list[dict]:
+        if cond:
+            sql = f"SELECT * FROM ({self._SQL}) WHERE {cond}"
+        cursor.execute(sql)
+        cursor.rowfactory = makeDictFactory(cursor)
+        rows = list(cursor.fetchall())
         out: list[dict] = []
         for row in rows:
             item = dict(row)
@@ -221,7 +163,7 @@ class OracleJob4(OracleJob):
 
 
 class OracleJob5(OracleJob):
-    SQL = """
+    _SQL = """
         SELECT
             5 AS seq,
             'job5' AS label,
@@ -233,30 +175,22 @@ class OracleJob5(OracleJob):
         super().__init__(
             name="job5",
             table="job5_results",
-            sql=self.SQL,
             db="DB_MAIN",
-            use_last_ts=False,
             test_rows=1000,
-            post_process=self.post_process,
         )
 
-    def makeQuery(self, cfg: dict[str, Any]) -> str:
+    def query(self, cfg: dict[str, Any], cursor) -> list[dict]:
+        sql = self._SQL
         cond = str((cfg.get("query_filters", {}) or {}).get("job5", "")).strip()
-        if not cond:
-            return self.sql
-        return f"""
-            SELECT *
-            FROM ({self.sql})
-            WHERE {cond}
-        """
-
-    @staticmethod
-    def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
+        if cond:
+            sql = f"SELECT * FROM ({self._SQL}) WHERE {cond}"
+        cursor.execute(sql)
+        cursor.rowfactory = makeDictFactory(cursor)
+        rows = list(cursor.fetchall())
         out: list[dict] = []
         for row in rows:
             item = dict(row)
-            item["processed_at"] = context["collected_at"]
-            item["pipeline_key"] = f"{context['job_name']}:{context['table']}"
+            item["pipeline_key"] = f"{self.name}:{self.table}"
             out.append(item)
         return out
 
