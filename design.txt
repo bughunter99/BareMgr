@@ -1,0 +1,175 @@
+BareMgr Rebuild Design Prompt
+
+목적
+- 이 파일은 현재 BareMgr 프로젝트를 다른 환경/새 저장소에서 동일하게 재구현하기 위해 AI에게 전달할 요청서다.
+- 아래 "마스터 요청문"을 그대로 전달하면, 소스/설정/폴더 구조/동작 규칙을 최대한 동일하게 재구현할 수 있다.
+
+마스터 요청문 (복사해서 사용)
+아래 요구사항으로 Python 프로젝트를 처음부터 생성해줘.
+프로젝트 이름은 BareMgr이고, 다중 노드 Active/Standby failover 기반 데이터 수집/복제/후처리 시스템이야.
+반드시 소스 구조, 설정 구조, 실행 흐름, 예외 처리, 테스트를 포함해서 만들어줘.
+
+1) 기술 스택
+- Python 3.13+
+- pyzmq, oracledb(우선) + cx_Oracle fallback, splunk-sdk, PyYAML, pytest
+- SQLite (thread-safe 접근)
+
+2) 루트 파일/폴더 구조
+- main.py
+- requirements.txt
+- README.md
+- config_app_node1.yml, config_app_node2.yml, config_app_node3.yml
+- ddl/ (table1.sql, table2.sql, table3.sql 샘플)
+- src/
+  - app.py
+  - config_loader.py
+  - logger.py
+  - collector.py
+  - oracle_collector.py
+  - oracle_jobs.py
+  - splunk_collector.py
+  - splunk_jobs.py
+  - db_registry.py
+  - store.py
+  - replicator.py
+  - orchestrator.py
+  - failover.py
+  - failover_zmq.py
+  - failover_db.py
+  - failover_zmq_stop.py
+  - failover_db_stop.py
+  - processing.py
+  - sync.py
+  - etc.py
+  - oracle_connection_manager.py
+  - oracle_driver.py
+  - oracle_utils.py
+  - oracle_sessionpool.py
+  - drone_client.py
+- tests/
+  - app/oracle/splunk/store/orchestrator/processing/sync/etc/driver/connection_manager/config 로직을 검증하는 pytest 파일들
+
+3) 런타임 핵심 흐름
+- main.py -> App(config) 시작
+- App는 config 로드 후 Logger, Oracle driver init, OracleConnectionManager, Store, Replicator, ProcessingPipeline, SyncJobManager, EtcManager, Collectors 생성
+- Failover backend는 zmq 또는 db 선택
+- Orchestrator가 collectors + periodic jobs(processing/sync/etc) 관리
+- 기본 시작 상태는 standby
+- active 전환 시: collectors active, replicator publisher 시작, subscriber 중지
+- standby 전환 시: collectors standby, replicator subscriber 시작, publisher 중지
+
+4) Failover
+- failover.backend: zmq | db
+- zmq: heartbeat + peer 기반
+- db: Oracle heartbeat 테이블 기반
+- failover stop 유틸 모듈 제공 (config 기반)
+
+5) Collector 공통 규칙
+- BaseCollector 스레드 루프
+- active 상태에서만 collect() 수행
+- collect 반환값 형태: (table, rows) 또는 (table, rows, jid)
+- store.upsert_many(table, rows) 수행 후 on_collect 콜백 호출
+
+6) Oracle 수집 규칙
+- oracle_jobs.py에 OracleJob base + OracleJob1..OracleJob5 클래스
+- 각 Job은 query(config, cursor)만 구현 (SQL 실행 + 바인딩 + 결과 가공까지 job 내부에서 완료)
+- job 단위 db alias 지원 (DB_MAIN/DB_TARGET)
+- OracleCollector는 잡별로 db alias resolve 후 query 호출
+- 잡 하나 실패해도 다음 잡 계속 실행
+- 에러 로그에 job/db/table 포함
+
+7) Splunk 수집 규칙
+- splunk_jobs.py에 SplunkJob base + SplunkJob1..SplunkJob5 클래스
+- 각 Job은 query(config, service, run_search) 구현
+- SplunkCollector는 잡별 query 호출
+- 잡 하나 실패해도 다음 잡 계속 실행
+- 에러 로그에 job/table 포함
+- 인증은 legacy(host/username/password)와 token(base_url/credential_key/splunk_token) 모두 지원
+
+8) Replication
+- Active: ZMQ PUSH로 peer들에게 chunk 전송
+- Standby: ZMQ PULL 수신 + queue + store loop로 SQLite 반영
+- chunk_rows/send_hwm/recv_hwm/subscriber_queue_size 설정 반영
+- 전송/수신/저장 단계별 로그
+
+9) SQLite 저장 규칙 (중요)
+- config의 top-level sqlite_connections 섹션 사용
+- sqlite_connections 각 항목 필드:
+  - name (매핑 식별자)
+  - table (replicator payload table명)
+  - path (대상 sqlite 파일 경로)
+  - ddl_file (DDL 스크립트 파일)
+- 프로그램 시작 시 Store.initialize_registered_ddls() 수행:
+  - table 존재하면 "already exists" 로그
+  - 없으면 ddl_file 실행 후 생성 로그
+- 저장 시 table 기준으로 sqlite_connections 매핑 찾아 해당 path DB에 write
+- 매핑이 없으면 기본 fallback: base_dir/{table}.db
+- 기존 구 키 하위호환도 넣어줘:
+  - oracle_connections 없으면 db_connections fallback
+  - sqlite_connections 없으면 sql_connections fallback
+
+10) Oracle 연결 레지스트리
+- top-level oracle_connections 목록 사용
+- alias -> DSN/pool 설정으로 변환하는 helper 제공
+- 여러 모듈(collector/processing/sync/etc)이 alias만 써서 공유
+
+11) Processing
+- pipeline.processing 주기 실행
+- run_on_active_only 적용
+- worker_mode: thread/process
+- workers, batch_min/max, source_oracle/current_oracle/oracle_write/worker_oracle_lookup 옵션
+- worker_oracle_lookup enabled 시 안전 모드 전환 로직 포함
+- object 결과 SQLite 로그 및 선택적 drone/oracle write 지원
+
+12) Sync
+- sync 주기 실행
+- mode: incremental/full
+- source_db/target_db alias
+- checkpoint SQLite 기반 last value 관리
+- dry_run 지원
+
+13) Etc
+- etc 주기 실행
+- task type: sqlite_heartbeat, sqlite_purge_table, oracle_probe
+- task별 interval
+- 실패 격리 (한 task 실패가 전체 중단으로 이어지지 않음)
+
+14) Config 이름 규칙 (최신)
+- oracle_connections (구: db_connections)
+- sqlite_connections (구: sql_connections)
+- sqlite.path는 선택 (없어도 node_id 기반 default path 사용 가능)
+
+15) 샘플 config 3개
+- node1/node2/node3
+- failover/replication peer 포트가 서로 맞물리게 구성
+- oracle_connections에 DB_MAIN/DB_TARGET 샘플
+- sqlite_connections에 table->path->ddl_file 샘플
+- collectors.oracle/splunk, pipeline, etc, sync 샘플 포함
+
+16) 테스트 요구
+- Oracle/Splunk job 단위 에러 격리 테스트
+- job별 db alias 라우팅 테스트
+- config 전달(query 내부에서 cfg 참조) 테스트
+- Store의 table별 sqlite 라우팅 테스트
+- DDL startup initialize 동작 테스트(존재/생성 로그 시나리오)
+- Orchestrator active_only 동작 테스트
+- Sync checkpoint roundtrip 테스트
+
+17) 완료 조건
+- 코드가 실행 가능해야 함
+- config_app_node1.yml로 앱 시작 가능
+- pytest 주요 테스트 통과
+- README에 실행법/구조/설정 키 설명 포함
+
+
+설계 참고 체크리스트
+- 이름 명시성: oracle_connections, sqlite_connections
+- collector query 모델 단순화: query 함수 하나로 SQL+가공 처리
+- replication subscriber write 대상 DB를 table 기준으로 분기
+- DDL은 시작 시점 선적용 + 존재여부 로깅
+- job 실패 격리 + continue
+- active/standby 전환 시 publisher/subscriber 상호배타
+
+사용 팁
+- 위 마스터 요청문을 먼저 전달
+- 그 다음 2차 요청으로 "tests까지 채워서 green 상태로"를 추가하면 안정적으로 재현 가능
