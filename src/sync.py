@@ -85,7 +85,7 @@ class SyncBase:
         self._cfg = cfg
         self._logger = logger
 
-        sync_cfg = cfg.get("pipeline", {}).get("sync", {})
+        sync_cfg = cfg.get("sync", {}) or cfg.get("pipeline", {}).get("sync", {})
         self.enabled = bool(sync_cfg.get("enabled", False))
         self.mode = str(sync_cfg.get("mode", "incremental")).strip().lower()
         self.dry_run = bool(sync_cfg.get("dry_run", True))
@@ -150,7 +150,7 @@ class SyncBase:
 class SyncOracleToOracle(SyncBase):
     def __init__(self, cfg: dict[str, Any], logger: Logger, connection_manager=None) -> None:
         super().__init__(cfg=cfg, logger=logger, connection_manager=connection_manager)
-        sync_cfg = cfg.get("pipeline", {}).get("sync", {})
+        sync_cfg = cfg.get("sync", {}) or cfg.get("pipeline", {}).get("sync", {})
         self._ensure_table = bool(sync_cfg.get("ensure_table", False))
 
     def run(self, ctx: dict[str, Any]) -> dict[str, Any]:

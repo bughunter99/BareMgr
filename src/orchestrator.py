@@ -113,6 +113,7 @@ class AppOrchestrator:
         replicator: Replicator | None = None,
     ) -> None:
         pipeline_cfg = cfg.get("pipeline", {})
+        sync_cfg = cfg.get("sync", {}) or pipeline_cfg.get("sync", {})
 
         self._processing = _PeriodicJobRunner(
             name="processing",
@@ -122,7 +123,7 @@ class AppOrchestrator:
         )
         self._sync = _PeriodicJobRunner(
             name="sync",
-            cfg=pipeline_cfg.get("sync", {}),
+            cfg=sync_cfg,
             logger=logger,
             callback=sync_callback,
         )

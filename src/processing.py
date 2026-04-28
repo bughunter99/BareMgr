@@ -159,7 +159,8 @@ class ProcessingPipeline:
         )
         self._object_logger = ObjectResultLogger(log_db_path, logger)
 
-        self._drone = DroneClient(p_cfg.get("drone", {}) or {}, logger)
+        drone_cfg = cfg.get("drone", {}) or p_cfg.get("drone", {}) or {}
+        self._drone = DroneClient(drone_cfg, logger)
         self._oracle_writer = OracleResultWriter(
             p_cfg.get("oracle_write", {}) or {},
             logger,

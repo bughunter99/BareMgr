@@ -3,13 +3,14 @@ weight: 90
 
 failover:
   backend: zmq
-  port: 5557
   heartbeat_interval: 1
   fail_after_missed_heartbeats: 2
   status_interval: 5
-  peers:
-    - 127.0.0.1:5555
-    - 127.0.0.1:5559
+  zmq:
+    port: 5557
+    peers:
+      - 127.0.0.1:5555
+      - 127.0.0.1:5559
   db:
     dsn: user/password@192.168.1.100:1521/ORCL
     table: FAILOVER_NODES
@@ -70,13 +71,6 @@ pipeline:
     output_table: pipeline_generated_objects
     object_log:
       db_path: data/app2/pipeline/object_results.db
-    drone:
-      enabled: false
-      dry_run: true
-      url: http://drone.local/api/messages
-      timeout_sec: 5
-      auth_token: ""
-      headers: {}
     current_oracle:
       enabled: false
       dsn: user/password@192.168.1.100:1521/ORCL
@@ -104,44 +98,6 @@ pipeline:
       dsn: user/password@192.168.1.100:1521/ORCL
       table: PIPELINE_RESULTS
       ensure_table: true
-  sync:
-    enabled: false
-    interval_sec: 600
-    run_on_active_only: true
-    workers: 1
-    mode: incremental
-    dry_run: true
-    source_dsn: user/password@192.168.1.100:1521/ORCL
-    target_dsn: user/password@192.168.1.101:1521/ORCL
-    tables:
-      - INVENTORY
-      - ORDERS
-      - AUDIT_EVENTS
-    key_column: ID
-    timestamp_column: UPDATED_AT
-    batch_size: 500
-    ensure_table: false
-    checkpoint_db: data/app2/pipeline/sync_checkpoint.db
-    source_pool:
-      enabled: false
-      user: user
-      password: password
-      dsn: 192.168.1.100:1521/ORCL
-      min: 1
-      max: 5
-      increment: 1
-      threaded: true
-      getmode: wait
-    target_pool:
-      enabled: false
-      user: user
-      password: password
-      dsn: 192.168.1.101:1521/ORCL
-      min: 1
-      max: 5
-      increment: 1
-      threaded: true
-      getmode: wait
   etc:
     enabled: true
     interval_sec: 60
@@ -177,6 +133,53 @@ pipeline:
         type: oracle_probe
         enabled: false
         interval_sec: 300
+
+drone:
+  enabled: false
+  dry_run: true
+  url: http://drone.local/api/messages
+  timeout_sec: 5
+  auth_token: ""
+  headers: {}
+
+sync:
+  enabled: false
+  interval_sec: 600
+  run_on_active_only: true
+  workers: 1
+  mode: incremental
+  dry_run: true
+  source_dsn: user/password@192.168.1.100:1521/ORCL
+  target_dsn: user/password@192.168.1.101:1521/ORCL
+  tables:
+    - INVENTORY
+    - ORDERS
+    - AUDIT_EVENTS
+  key_column: ID
+  timestamp_column: UPDATED_AT
+  batch_size: 500
+  ensure_table: false
+  checkpoint_db: data/app2/pipeline/sync_checkpoint.db
+  source_pool:
+    enabled: false
+    user: user
+    password: password
+    dsn: 192.168.1.100:1521/ORCL
+    min: 1
+    max: 5
+    increment: 1
+    threaded: true
+    getmode: wait
+  target_pool:
+    enabled: false
+    user: user
+    password: password
+    dsn: 192.168.1.101:1521/ORCL
+    min: 1
+    max: 5
+    increment: 1
+    threaded: true
+    getmode: wait
 
 collectors:
   oracle:

@@ -14,11 +14,18 @@ class FailoverNode_zmq(Failovernode):
     def __init__(self, config_file: str, logger: Logger | None = None):
         super().__init__(config_file=config_file, logger=logger)
         failover_cfg = self.config.get("failover", {})
+        zmq_cfg = failover_cfg.get("zmq", {})
         # Backward compatibility:
-        # - old flat keys: peers/port/heartbeat_interval/log_base
-        # - new grouped keys: failover.*, logging.log_base
-        self.peers = failover_cfg.get("peers", self.config.get("peers", []))
-        self.port = failover_cfg.get("port", self.config.get("port", 5555))
+        # - old flat keys: failover.peers/failover.port
+        # - new grouped keys: failover.zmq.peers/failover.zmq.port
+        self.peers = zmq_cfg.get(
+            "peers",
+            failover_cfg.get("peers", self.config.get("peers", [])),
+        )
+        self.port = zmq_cfg.get(
+            "port",
+            failover_cfg.get("port", self.config.get("port", 5555)),
+        )
         self.ctx = zmq.Context()
         self._peer_reachable: dict[str, bool] = {}
 
