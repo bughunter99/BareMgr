@@ -129,9 +129,10 @@ class AppOrchestrator:
         )
         self._etc = None
         if etc_callback is not None:
+            etc_cfg = cfg.get("etc", {}) or pipeline_cfg.get("etc", {})
             self._etc = _PeriodicJobRunner(
                 name="etc",
-                cfg=pipeline_cfg.get("etc", {}),
+                cfg=etc_cfg,
                 logger=logger,
                 callback=etc_callback,
             )

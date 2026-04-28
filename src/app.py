@@ -28,6 +28,7 @@ from typing import Any
 
 from .collector import BaseCollector
 from .config_loader import load_config
+from .db_registry import build_registry
 from .etc import EtcManager
 from .failover import Failovernode
 from .failover_db import FailoverNode_db
@@ -56,6 +57,7 @@ class App:
         )
         init_oracle_client_from_config(self._cfg, logger=self._logger)
         self._oracle_connection_manager = OracleConnectionManager(self._logger)
+        self._db_registry = build_registry(self._cfg)
 
         # ── 저장소 ───────────────────────────────────────────────────
         self._store = Store(self._cfg["sqlite"]["path"])
@@ -116,13 +118,16 @@ class App:
                     logger=self._logger,
                     on_collect=self._on_collect,
                     connection_manager=self._oracle_connection_manager,
+                    db_registry=self._db_registry,
                 )
             )
 
-        if col_cfg.get("splunk", {}).get("enabled"):
+        # splunk은 최상위 레벨에서 읽고, 없으면 collectors.splunk fallback
+        splunk_cfg = self._cfg.get("splunk", {}) or col_cfg.get("splunk", {})
+        if splunk_cfg.get("enabled"):
             collectors.append(
                 SplunkCollector(
-                    cfg=col_cfg["splunk"],
+                    cfg=splunk_cfg,
                     store=self._store,
                     logger=self._logger,
                     on_collect=self._on_collect,

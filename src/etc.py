@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any
 
+from .db_registry import build_registry, resolve_dsn, resolve_pool_cfg
 from .logger import Logger
 from .oracle_connection_manager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
@@ -29,7 +30,7 @@ class EtcManager:
         self._store = store
         self._logger = logger
 
-        etc_cfg = cfg.get("pipeline", {}).get("etc", {})
+        etc_cfg = cfg.get("etc", {}) or cfg.get("pipeline", {}).get("etc", {})
         self.enabled = bool(etc_cfg.get("enabled", False))
         self._workers = max(1, int(etc_cfg.get("workers", 1)))
         self._tasks = list(etc_cfg.get("tasks", []))
@@ -68,12 +69,19 @@ class EtcManager:
         self._etc_conn.commit()
         self._etc_lock = threading.Lock()
 
-        oracle_cfg = etc_cfg.get("oracle", {})
+        db_registry = build_registry(cfg)
+        # db: alias 우선, 없으면 oracle.dsn, 없으면 collectors.oracle.dsn fallback
+        db_alias = str(etc_cfg.get("db", "")).strip()
+        oracle_cfg = etc_cfg.get("oracle", {}) or {}
         collector_oracle_dsn = cfg.get("collectors", {}).get("oracle", {}).get("dsn", "")
-        self._oracle_dsn = str(oracle_cfg.get("dsn") or collector_oracle_dsn).strip()
+        fallback_dsn = str(oracle_cfg.get("dsn") or collector_oracle_dsn).strip()
+        self._oracle_dsn = resolve_dsn(db_registry, db_alias, fallback=fallback_dsn)
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_connection_manager = connection_manager is None
-        self._pool_cfg = (etc_cfg.get("oracle", {}) or {}).get("oracle_pool", {}) or {}
+        # pool config: alias 우선, 없으면 oracle.oracle_pool fallback
+        pool_from_alias = resolve_pool_cfg(db_registry, db_alias)
+        legacy_pool = oracle_cfg.get("oracle_pool", {}) or {}
+        self._pool_cfg = pool_from_alias or legacy_pool
         self._pool_enabled = bool(self._pool_cfg.get("enabled", False))
 
     def run(self, ctx: dict[str, Any]) -> None:

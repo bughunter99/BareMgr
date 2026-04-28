@@ -43,6 +43,30 @@ oracle_client:
   config_dir: ""
   driver_name: BareMgr
 
+db_connections:
+  - alias: DB_MAIN
+    tns: 192.168.1.100:1521/ORCL
+    user: user
+    password: password
+    pool:
+      enabled: false
+      min: 2
+      max: 10
+      increment: 1
+      threaded: true
+      getmode: wait
+  - alias: DB_TARGET
+    tns: 192.168.1.101:1521/ORCL
+    user: user
+    password: password
+    pool:
+      enabled: false
+      min: 1
+      max: 5
+      increment: 1
+      threaded: true
+      getmode: wait
+
 replication:
   port: 5556
   chunk_rows: 1000
@@ -64,7 +88,7 @@ pipeline:
     batch_max: 8000
     source_oracle:
       enabled: true
-      dsn: user/password@192.168.1.100:1521/ORCL
+      db: DB_MAIN
       sql: SELECT id, updated_at, name, qty FROM inventory ORDER BY updated_at DESC
       limit: 8000
     input_limit_per_table: 500
@@ -73,19 +97,11 @@ pipeline:
       db_path: data/app1/pipeline/object_results.db
     current_oracle:
       enabled: false
-      dsn: user/password@192.168.1.100:1521/ORCL
+      db: DB_MAIN
       sql: SELECT id, updated_at FROM inventory ORDER BY updated_at DESC
       limit: 1000
     oracle_pool:
-      enabled: false
-      user: user
-      password: password
-      dsn: 192.168.1.100:1521/ORCL
-      min: 2
-      max: 10
-      increment: 1
-      threaded: true
-      getmode: wait
+      db: DB_MAIN
     worker_oracle_lookup:
       enabled: false
       sql: SELECT id, updated_at FROM inventory WHERE id = :lookup_key
@@ -95,44 +111,34 @@ pipeline:
     oracle_write:
       enabled: false
       dry_run: true
-      dsn: user/password@192.168.1.100:1521/ORCL
+      db: DB_MAIN
       table: PIPELINE_RESULTS
       ensure_table: true
-  etc:
-    enabled: true
-    interval_sec: 60
-    run_on_active_only: true
-    workers: 1
-    sqlite_log:
-      db_path: data/app1/pipeline/etc_runs.db
-    oracle:
-      dsn: user/password@192.168.1.100:1521/ORCL
-      oracle_pool:
-        enabled: false
-        user: user
-        password: password
-        dsn: 192.168.1.100:1521/ORCL
-        min: 1
-        max: 5
-        increment: 1
-        threaded: true
-        getmode: wait
-    tasks:
-      - name: etc-heartbeat
-        type: sqlite_heartbeat
-        enabled: true
-        interval_sec: 60
-        table: etc_heartbeat
-      - name: purge-object-results
-        type: sqlite_purge_table
-        enabled: true
-        interval_sec: 300
-        table: object_results
-        retention_minutes: 1440
-      - name: oracle-probe
-        type: oracle_probe
-        enabled: false
-        interval_sec: 300
+
+etc:
+  enabled: true
+  interval_sec: 60
+  run_on_active_only: true
+  workers: 1
+  db: DB_MAIN
+  sqlite_log:
+    db_path: data/app1/pipeline/etc_runs.db
+  tasks:
+    - name: etc-heartbeat
+      type: sqlite_heartbeat
+      enabled: true
+      interval_sec: 60
+      table: etc_heartbeat
+    - name: purge-object-results
+      type: sqlite_purge_table
+      enabled: true
+      interval_sec: 300
+      table: object_results
+      retention_minutes: 1440
+    - name: oracle-probe
+      type: oracle_probe
+      enabled: false
+      interval_sec: 300
 
 drone:
   enabled: false
@@ -149,8 +155,8 @@ sync:
   workers: 1
   mode: incremental
   dry_run: true
-  source_dsn: user/password@192.168.1.100:1521/ORCL
-  target_dsn: user/password@192.168.1.101:1521/ORCL
+  source_db: DB_MAIN
+  target_db: DB_TARGET
   tables:
     - INVENTORY
     - ORDERS
@@ -160,42 +166,12 @@ sync:
   batch_size: 500
   ensure_table: false
   checkpoint_db: data/app1/pipeline/sync_checkpoint.db
-  source_pool:
-    enabled: false
-    user: user
-    password: password
-    dsn: 192.168.1.100:1521/ORCL
-    min: 1
-    max: 5
-    increment: 1
-    threaded: true
-    getmode: wait
-  target_pool:
-    enabled: false
-    user: user
-    password: password
-    dsn: 192.168.1.101:1521/ORCL
-    min: 1
-    max: 5
-    increment: 1
-    threaded: true
-    getmode: wait
 
 collectors:
   oracle:
     enabled: true
-    dsn: user/password@192.168.1.100:1521/ORCL
+    db: DB_MAIN
     interval_sec: 60
-    oracle_pool:
-      enabled: false
-      user: user
-      password: password
-      dsn: 192.168.1.100:1521/ORCL
-      min: 2
-      max: 10
-      increment: 1
-      threaded: true
-      getmode: wait
     test:
       enabled: true
       rows: 5000
@@ -214,24 +190,24 @@ collectors:
         table: audit_events
         test_rows: 10000
 
-  splunk:
+splunk:
+  enabled: false
+  host: splunk.internal
+  port: 8089
+  username: admin
+  password: changeme
+  scheme: https
+  interval_sec: 120
+  test:
     enabled: false
-    host: splunk.internal
-    port: 8089
-    username: admin
-    password: changeme
-    scheme: https
-    interval_sec: 120
-    test:
-      enabled: false
-      rows: 10000
-      emit_once: false
-    jobs:
-      - name: error_events
-        query: search index=main level=ERROR earliest=-2m latest=now | table _time, host, message
-        table: splunk_errors
-        test_rows: 10000
-      - name: access_logs
-        query: search index=access earliest=-2m latest=now | table _time, src_ip, uri, status
-        table: splunk_access
-        test_rows: 10000
+    rows: 10000
+    emit_once: false
+  jobs:
+    - name: error_events
+      query: search index=main level=ERROR earliest=-2m latest=now | table _time, host, message
+      table: splunk_errors
+      test_rows: 10000
+    - name: access_logs
+      query: search index=access earliest=-2m latest=now | table _time, src_ip, uri, status
+      table: splunk_access
+      test_rows: 10000

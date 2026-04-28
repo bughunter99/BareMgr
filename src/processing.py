@@ -15,6 +15,7 @@ from typing import Any
 
 from .logger import Logger
 from .oracle_connection_manager import OracleConnectionManager
+from .db_registry import build_registry, resolve_dsn, resolve_pool_cfg
 from .drone_client import DroneClient
 from .oracle_sessionpool import OracleResultWriter, OracleSessionPool
 from .oracle_utils import makeDictFactory, validate_oracle_connection
@@ -123,7 +124,33 @@ class ProcessingPipeline:
         self._workers = max(1, int(p_cfg.get("workers", 4)))
         self._output_table = str(p_cfg.get("output_table", "pipeline_generated_objects"))
         self._input_limit_per_table = max(1, int(p_cfg.get("input_limit_per_table", 500)))
-        self._source_oracle_cfg = p_cfg.get("source_oracle", {}) or {}
+
+        # DB alias 레지스트리
+        db_registry = build_registry(cfg)
+
+        def _resolve_section_dsn(section: dict, fallback: str = "") -> str:
+            alias = str(section.get("db", "")).strip()
+            return resolve_dsn(db_registry, alias, fallback=str(section.get("dsn", fallback)).strip())
+
+        def _resolve_section_pool(section: dict) -> dict:
+            alias = str(section.get("db", "")).strip()
+            return resolve_pool_cfg(db_registry, alias) or section.get("oracle_pool", {}) or {}
+
+        raw_source = p_cfg.get("source_oracle", {}) or {}
+        self._source_oracle_cfg = dict(raw_source)
+        self._source_oracle_cfg["_dsn"] = _resolve_section_dsn(raw_source)
+
+        raw_current = p_cfg.get("current_oracle", {}) or {}
+        self._current_oracle_cfg = dict(raw_current)
+        self._current_oracle_cfg["_dsn"] = _resolve_section_dsn(raw_current)
+
+        raw_pool = p_cfg.get("oracle_pool", {}) or {}
+        resolved_pool = _resolve_section_pool({"db": raw_pool.get("db", "")}) if raw_pool.get("db") else raw_pool
+        self._oracle_pool = OracleSessionPool(resolved_pool, logger, connection_manager=self._connection_manager)
+
+        raw_write = p_cfg.get("oracle_write", {}) or {}
+        resolved_write = dict(raw_write)
+        resolved_write["_dsn"] = _resolve_section_dsn(raw_write)
 
         input_tables = p_cfg.get("input_tables", []) or []
         if input_tables:
@@ -131,7 +158,6 @@ class ProcessingPipeline:
         else:
             self._input_tables = self._collect_default_input_tables(cfg)
 
-        self._current_oracle_cfg = p_cfg.get("current_oracle", {}) or {}
         self._worker_oracle_lookup_cfg = p_cfg.get("worker_oracle_lookup", {}) or {}
         self._worker_oracle_lookup_enabled = bool(self._worker_oracle_lookup_cfg.get("enabled", False))
         self._status_lock = threading.Lock()
@@ -148,8 +174,6 @@ class ProcessingPipeline:
             "last_error": "",
         }
 
-        self._oracle_pool = OracleSessionPool(p_cfg.get("oracle_pool", {}) or {}, logger)
-
         object_log_cfg = p_cfg.get("object_log", {}) or {}
         log_db_path = str(
             object_log_cfg.get(
@@ -162,7 +186,7 @@ class ProcessingPipeline:
         drone_cfg = cfg.get("drone", {}) or p_cfg.get("drone", {}) or {}
         self._drone = DroneClient(drone_cfg, logger)
         self._oracle_writer = OracleResultWriter(
-            p_cfg.get("oracle_write", {}) or {},
+            resolved_write,
             logger,
             connection_manager=self._connection_manager,
         )
@@ -171,12 +195,20 @@ class ProcessingPipeline:
         tables: list[str] = []
         collectors = cfg.get("collectors", {})
 
-        for collector_name in ("oracle", "splunk"):
+        for collector_name in ("oracle",):
             jobs = collectors.get(collector_name, {}).get("jobs", []) or []
             for job in jobs:
                 table = str(job.get("table", "")).strip()
                 if table and table not in tables:
                     tables.append(table)
+
+        # splunk는 최상위 레벨에서도 확인
+        for splunk_cfg in (cfg.get("splunk", {}), collectors.get("splunk", {})):
+            for job in (splunk_cfg or {}).get("jobs", []) or []:
+                table = str(job.get("table", "")).strip()
+                if table and table not in tables:
+                    tables.append(table)
+
         return tables
 
     def _load_source_rows(self) -> list[dict[str, Any]]:
@@ -198,7 +230,7 @@ class ProcessingPipeline:
         if not bool(cfg.get("enabled", False)):
             return []
 
-        dsn = str(cfg.get("dsn", "")).strip()
+        dsn = str(cfg.get("_dsn") or cfg.get("dsn", "")).strip()
         sql = str(cfg.get("sql", "")).strip()
         limit = max(1, int(cfg.get("limit", 1000)))
         if not sql:
@@ -229,7 +261,7 @@ class ProcessingPipeline:
         if not sql:
             return []
 
-        dsn = str(cfg.get("dsn", "")).strip()
+        dsn = str(cfg.get("_dsn") or cfg.get("dsn", "")).strip()
         limit = max(1, int(cfg.get("limit", target_count)))
         fetch_size = min(target_count, limit)
 

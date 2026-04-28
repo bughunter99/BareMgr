@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any
 
+from .db_registry import build_registry, resolve_dsn, resolve_pool_cfg
 from .logger import Logger
 from .oracle_connection_manager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
@@ -97,6 +98,14 @@ class SyncBase:
         )
         self.source_dsn = str(sync_cfg.get("source_dsn", "")).strip()
         self.target_dsn = str(sync_cfg.get("target_dsn", "")).strip()
+        # source_db/target_db alias 우선
+        db_registry = build_registry(cfg)
+        source_alias = str(sync_cfg.get("source_db", "")).strip()
+        target_alias = str(sync_cfg.get("target_db", "")).strip()
+        if source_alias:
+            self.source_dsn = resolve_dsn(db_registry, source_alias, fallback=self.source_dsn)
+        if target_alias:
+            self.target_dsn = resolve_dsn(db_registry, target_alias, fallback=self.target_dsn)
 
         table_names = sync_cfg.get("tables", []) or []
         self.tables = [_normalize_identifier(t) for t in table_names]
@@ -118,8 +127,9 @@ class SyncBase:
         )
         self._checkpoint = SyncCheckpointStore(checkpoint_path)
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
-        self._source_pool_cfg = sync_cfg.get("source_pool", {}) or {}
-        self._target_pool_cfg = sync_cfg.get("target_pool", {}) or {}
+        # pool: alias 우선, 없으면 source_pool/target_pool 섹션 fallback
+        self._source_pool_cfg = resolve_pool_cfg(db_registry, source_alias) or sync_cfg.get("source_pool", {}) or {}
+        self._target_pool_cfg = resolve_pool_cfg(db_registry, target_alias) or sync_cfg.get("target_pool", {}) or {}
 
     def _connect(self, dsn: str) -> Any:
         cx_Oracle = get_cx_oracle()

@@ -14,6 +14,7 @@ import time
 from typing import TYPE_CHECKING
 
 from .collector import BaseCollector
+from .db_registry import resolve_dsn, resolve_pool_cfg
 from .oracle_connection_manager import OracleConnectionManager
 from .oracle_utils import makeDictFactory, validate_oracle_connection
 
@@ -46,6 +47,7 @@ class OracleCollector(BaseCollector):
         logger: "Logger",
         on_collect=None,
         connection_manager: OracleConnectionManager | None = None,
+        db_registry: dict | None = None,
     ) -> None:
         super().__init__(
             name="oracle",
@@ -54,7 +56,7 @@ class OracleCollector(BaseCollector):
             logger=logger,
             on_collect=on_collect,
         )
-        self._dsn: str = cfg["dsn"]
+        self._dsn: str = cfg["dsn"] if "dsn" in cfg else ""
         self._jobs: list[dict] = cfg.get("jobs", [])
         self._test_cfg: dict = cfg.get("test", {})
         self._test_mode: bool = cfg.get("test_mode", False) or self._test_cfg.get("enabled", False)
@@ -68,7 +70,15 @@ class OracleCollector(BaseCollector):
         }
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_connection_manager = connection_manager is None
-        self._pool_cfg = cfg.get("oracle_pool", {}) or {}
+        # db: alias 우선, 없으면 dsn: fallback
+        _registry = db_registry or {}
+        db_alias = str(cfg.get("db", "")).strip()
+        if db_alias:
+            self._dsn = resolve_dsn(_registry, db_alias, fallback=self._dsn)
+        # pool: alias 우선, 없으면 oracle_pool 섹션 fallback
+        pool_from_alias = resolve_pool_cfg(_registry, db_alias)
+        legacy_pool = cfg.get("oracle_pool", {}) or {}
+        self._pool_cfg = pool_from_alias or legacy_pool
         self._pool_enabled = bool(self._pool_cfg.get("enabled", False))
 
     # ── 연결 관리 ────────────────────────────────────────────────────

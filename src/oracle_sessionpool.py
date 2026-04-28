@@ -60,7 +60,7 @@ class OracleResultWriter:
         self._logger = logger
         self.enabled = bool(cfg.get("enabled", False))
         self._dry_run = bool(cfg.get("dry_run", True))
-        self._dsn = str(cfg.get("dsn", "")).strip()
+        self._dsn = str(cfg.get("_dsn") or cfg.get("dsn", "")).strip()
         self._table = self._normalize_table_name(str(cfg.get("table", "PIPELINE_RESULTS")))
         self._ensure_table_enabled = bool(cfg.get("ensure_table", True))
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
