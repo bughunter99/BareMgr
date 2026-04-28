@@ -3,6 +3,7 @@
 oracle_collector.py — Oracle DB 주기 수집기.
 
 · 수집 잡은 oracle_jobs.py의 ORACLE_JOBS에 코드로 정의한다.
+· 각 잡은 db alias를 지정해 서로 다른 DB에서 조회할 수 있다.
 · use_last_ts=True 인 잡은 :last_ts 바인드 변수로 증분 수집한다.
 """
 
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import time
+from typing import Any
 from typing import TYPE_CHECKING
 
 from .collector import BaseCollector
@@ -55,28 +57,49 @@ class OracleCollector(BaseCollector):
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_connection_manager = connection_manager is None
         # db: alias 우선, 없으면 dsn: fallback
-        _registry = db_registry or {}
-        db_alias = str(cfg.get("db", "")).strip()
-        if db_alias:
-            self._dsn = resolve_dsn(_registry, db_alias, fallback=self._dsn)
+        self._db_registry: dict[str, dict] = db_registry or {}
+        self._default_db_alias = str(cfg.get("db", "")).strip()
+        if self._default_db_alias:
+            self._dsn = resolve_dsn(self._db_registry, self._default_db_alias, fallback=self._dsn)
         # pool: alias 우선, 없으면 oracle_pool 섹션 fallback
-        pool_from_alias = resolve_pool_cfg(_registry, db_alias)
+        pool_from_alias = resolve_pool_cfg(self._db_registry, self._default_db_alias)
         legacy_pool = cfg.get("oracle_pool", {}) or {}
-        self._pool_cfg = pool_from_alias or legacy_pool
-        self._pool_enabled = bool(self._pool_cfg.get("enabled", False))
+        self._default_pool_cfg = pool_from_alias or legacy_pool
+        self._default_pool_enabled = bool(self._default_pool_cfg.get("enabled", False))
 
     # ── 연결 관리 ────────────────────────────────────────────────────
-    def _get_conn(self):
-        return self._connection_manager.get_connection(self._dsn, threaded=True)
+    def _get_conn(self, dsn: str):
+        return self._connection_manager.get_connection(dsn, threaded=True)
 
-    def _close_conn(self) -> None:
-        self._connection_manager.invalidate(self._dsn, threaded=True)
+    def _close_conn(self, dsn: str) -> None:
+        self._connection_manager.invalidate(dsn, threaded=True)
 
-    def _acquire_conn(self):
-        if self._pool_enabled:
-            pool = self._connection_manager.get_session_pool(self._pool_cfg)
+    def _acquire_conn(self, *, dsn: str, pool_cfg: dict[str, Any], pool_enabled: bool):
+        if pool_enabled:
+            pool = self._connection_manager.get_session_pool(pool_cfg)
             return pool.acquire(), pool
-        return self._get_conn(), None
+        return self._get_conn(dsn), None
+
+    def _resolve_job_connection(self, job: OracleJob) -> tuple[str, dict[str, Any], bool, str]:
+        job_db_alias = str(job.db).strip() or self._default_db_alias
+        dsn = self._dsn
+        if job_db_alias:
+            dsn = resolve_dsn(self._db_registry, job_db_alias, fallback=dsn)
+
+        pool_cfg = self._default_pool_cfg
+        pool_enabled = self._default_pool_enabled
+        if job_db_alias:
+            alias_pool_cfg = resolve_pool_cfg(self._db_registry, job_db_alias)
+            if alias_pool_cfg:
+                pool_cfg = alias_pool_cfg
+                pool_enabled = bool(pool_cfg.get("enabled", False))
+
+        if not str(dsn).strip():
+            raise ValueError(
+                f"Oracle DSN is required for job={job.name}. Check job.db alias or collectors.oracle.dsn"
+            )
+
+        return dsn, pool_cfg, pool_enabled, job_db_alias
 
     # ── 수집 ────────────────────────────────────────────────────────
     def collect(self) -> list[tuple[str, list[dict], str]]:
@@ -84,14 +107,24 @@ class OracleCollector(BaseCollector):
             return self._collect_test_rows()
 
         results: list[tuple[str, list[dict], str]] = []
-        conn, _pool = self._acquire_conn()
-        validate_oracle_connection(conn)
-        cursor = conn.cursor()
 
         for job in self._jobs:
             jid = self.logger.new_jid(prefix="ORA")
             with self.logger.job_context(jid=jid, prefix="ORA"):
+                dsn = ""
+                conn = None
+                _pool = None
+                cursor = None
+                failed = False
                 try:
+                    dsn, pool_cfg, pool_enabled, job_db_alias = self._resolve_job_connection(job)
+                    conn, _pool = self._acquire_conn(
+                        dsn=dsn,
+                        pool_cfg=pool_cfg,
+                        pool_enabled=pool_enabled,
+                    )
+                    validate_oracle_connection(conn)
+                    cursor = conn.cursor()
                     started_at = time.perf_counter()
                     if job.use_last_ts:
                         cursor.execute(job.sql, {"last_ts": self._last_ts[job.name]})
@@ -106,24 +139,34 @@ class OracleCollector(BaseCollector):
                             "%Y-%m-%d %H:%M:%S"
                         )
                     self.logger.info(
-                        "[OracleCollector] job=%s table=%s rows=%d elapsed=%.3fs",
+                        "[OracleCollector] job=%s db=%s table=%s rows=%d elapsed=%.3fs",
                         job.name,
+                        job_db_alias or "<default>",
                         job.table,
                         len(rows),
                         elapsed,
                     )
                 except Exception:
+                    failed = True
                     self.logger.exception("[OracleCollector] job=%s query error", job.name)
-                    cursor.close()
-                    if _pool is not None:
-                        _pool.release(conn)
-                    else:
-                        self._close_conn()
                     raise
+                finally:
+                    if cursor is not None:
+                        try:
+                            cursor.close()
+                        except Exception:
+                            pass
+                    if conn is not None and _pool is not None:
+                        try:
+                            _pool.release(conn)
+                        except Exception:
+                            pass
+                    elif failed and conn is not None and dsn:
+                        try:
+                            self._close_conn(dsn)
+                        except Exception:
+                            pass
 
-        cursor.close()
-        if _pool is not None:
-            _pool.release(conn)
         return results
 
     def _collect_test_rows(self) -> list[tuple[str, list[dict], str]]:
