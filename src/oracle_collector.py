@@ -44,6 +44,7 @@ class OracleCollector(BaseCollector):
             logger=logger,
             on_collect=on_collect,
         )
+        self._cfg: dict = cfg
         self._dsn: str = cfg["dsn"] if "dsn" in cfg else ""
         self._jobs: list[OracleJob] = list(ORACLE_JOBS)
         self._test_cfg: dict = cfg.get("test", {})
@@ -165,10 +166,11 @@ class OracleCollector(BaseCollector):
                     validate_oracle_connection(conn)
                     cursor = conn.cursor()
                     started_at = time.perf_counter()
+                    sql = job.makeQuery(self._cfg)
                     if job.use_last_ts:
-                        cursor.execute(job.sql, {"last_ts": self._last_ts[job.name]})
+                        cursor.execute(sql, {"last_ts": self._last_ts[job.name]})
                     else:
-                        cursor.execute(job.sql)
+                        cursor.execute(sql)
                     cursor.rowfactory = makeDictFactory(cursor)
                     rows = list(cursor.fetchall())
                     collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

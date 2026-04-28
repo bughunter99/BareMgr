@@ -9,11 +9,12 @@ splunk_collector.py — Splunk 주기 수집기.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import inspect
 import time
 from typing import TYPE_CHECKING
 
 from .collector import BaseCollector
-from .splunk_jobs import SPLUNK_JOBS, SplunkJob
+from .splunk_jobs import SPLUNK_JOBS, PostProcessContext, SplunkJob
 from .splunk_search import SplunkSearch, configure_splunk_search
 
 if TYPE_CHECKING:
@@ -36,6 +37,7 @@ class SplunkCollector(BaseCollector):
             logger=logger,
             on_collect=on_collect,
         )
+        self._cfg: dict = cfg
         self._host: str = str(cfg.get("host", "")).strip()
         self._port: int = cfg.get("port", 8089)
         self._username: str = str(cfg.get("username", "")).strip()
@@ -79,6 +81,41 @@ class SplunkCollector(BaseCollector):
 
     def _close_service(self) -> None:
         self._service = None
+
+    def _apply_post_process(
+        self,
+        *,
+        job: SplunkJob,
+        rows: list[dict],
+        jid: str,
+        collected_at: str,
+    ) -> list[dict]:
+        context: PostProcessContext = {
+            "job_name": job.name,
+            "table": job.table,
+            "jid": jid,
+            "collected_at": collected_at,
+        }
+
+        def _run_one(fn, in_rows: list[dict]) -> list[dict]:
+            try:
+                arg_count = len(inspect.signature(fn).parameters)
+            except (TypeError, ValueError):
+                arg_count = 1
+
+            if arg_count >= 2:
+                out_rows = fn(in_rows, context)
+            else:
+                out_rows = fn(in_rows)
+
+            if out_rows is None:
+                raise ValueError(f"post_process must return list[dict], got None for job={job.name}")
+            return out_rows
+
+        processed = _run_one(job.post_process, rows)
+        for fn in job.post_processes:
+            processed = _run_one(fn, processed)
+        return processed
 
     # ── 수집 ────────────────────────────────────────────────────────
     def _run_search(self, service, query: str, job_name: str) -> list[dict]:
@@ -126,7 +163,15 @@ class SplunkCollector(BaseCollector):
             with self.logger.job_context(jid=jid, prefix="SPL"):
                 try:
                     started_at = time.perf_counter()
-                    rows = self._run_search(service, job.query, job.name)
+                    query = job.makeQuery(self._cfg)
+                    rows = self._run_search(service, query, job.name)
+                    collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                    rows = self._apply_post_process(
+                        job=job,
+                        rows=rows,
+                        jid=jid,
+                        collected_at=collected_at,
+                    )
                     elapsed = time.perf_counter() - started_at
                     if rows:
                         collected.append((job.table, rows, jid))

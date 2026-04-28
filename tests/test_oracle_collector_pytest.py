@@ -372,3 +372,66 @@ def test_oracle_collector_applies_multiple_post_processes_in_order(tmp_path, mon
         collector.stop()
         store.close()
         log.stop()
+
+
+def test_oracle_collector_uses_make_query_with_config(tmp_path, monkeypatch) -> None:
+    executed_sql: list[str] = []
+
+    class FakeCursor:
+        description = [("SEQ",), ("LABEL",)]
+
+        def execute(self, sql, params=None):
+            executed_sql.append(str(sql))
+
+        def fetchone(self):
+            return ("2026-04-28",)
+
+        def fetchall(self):
+            return [("1", "ok")]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    fake_module = SimpleNamespace(connect=lambda dsn, threaded=True: FakeConnection())
+    monkeypatch.setitem(sys.modules, "cx_Oracle", fake_module)
+
+    class ConfigDrivenJob(OracleJob):
+        def __init__(self) -> None:
+            super().__init__(
+                name="job_cfg",
+                table="t_cfg",
+                sql="SELECT 1 AS seq, 'x' AS label FROM dual",
+                use_last_ts=False,
+            )
+
+        def makeQuery(self, cfg: dict) -> str:
+            threshold = int((cfg.get("query_params", {}) or {}).get("threshold", 0))
+            return f"SELECT {threshold} AS seq, 'cfg' AS label FROM dual"
+
+    store = Store(str(tmp_path / "app6"))
+    log = Logger(name="test.oracle.collector.makequery", log_base=str(tmp_path / "logs" / "oracle-collector-makequery"), console=False)
+
+    collector = OracleCollector(
+        cfg={"dsn": "dsn", "query_params": {"threshold": 77}},
+        store=store,
+        logger=log,
+    )
+    monkeypatch.setattr(oracle_collector_module, "ORACLE_JOBS", [ConfigDrivenJob()])
+    collector._jobs = list(oracle_collector_module.ORACLE_JOBS)
+    collector._last_ts = {job.name: "1970-01-01 00:00:00" for job in collector._jobs}
+
+    try:
+        results = collector.collect()
+        assert len(results) == 1
+        assert "SELECT 77 AS seq, 'cfg' AS label FROM dual" in executed_sql
+    finally:
+        collector.stop()
+        store.close()
+        log.stop()

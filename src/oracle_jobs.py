@@ -15,6 +15,7 @@ oracle_jobs.py — OracleCollector가 실행할 수집 잡 코드 정의.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 from typing import Callable
 from typing import TypedDict
 
@@ -47,6 +48,10 @@ class OracleJob:
     post_process: PostProcessFn = identity_post_process
     post_processes: list[PostProcessFn] = field(default_factory=list)
 
+    def makeQuery(self, cfg: dict[str, Any]) -> str:
+        """collector config를 받아 실행할 SQL을 동적으로 생성한다."""
+        return self.sql
+
 
 class OracleJob1(OracleJob):
     SQL = """
@@ -67,6 +72,16 @@ class OracleJob1(OracleJob):
             test_rows=5000,
             post_process=self.post_process,
         )
+
+    def makeQuery(self, cfg: dict[str, Any]) -> str:
+        cond = str((cfg.get("query_filters", {}) or {}).get("job1", "")).strip()
+        if not cond:
+            return self.sql
+        return f"""
+            SELECT *
+            FROM ({self.sql})
+            WHERE {cond}
+        """
 
     @staticmethod
     def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
@@ -98,6 +113,16 @@ class OracleJob2(OracleJob):
             test_rows=3000,
             post_process=self.post_process,
         )
+
+    def makeQuery(self, cfg: dict[str, Any]) -> str:
+        cond = str((cfg.get("query_filters", {}) or {}).get("job2", "")).strip()
+        if not cond:
+            return self.sql
+        return f"""
+            SELECT *
+            FROM ({self.sql})
+            WHERE {cond}
+        """
 
     @staticmethod
     def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
@@ -132,6 +157,16 @@ class OracleJob3(OracleJob):
             post_process=self.post_process,
         )
 
+    def makeQuery(self, cfg: dict[str, Any]) -> str:
+        cond = str((cfg.get("query_filters", {}) or {}).get("job3", "")).strip()
+        if not cond:
+            return self.sql
+        return f"""
+            SELECT *
+            FROM ({self.sql})
+            WHERE {cond}
+        """
+
     @staticmethod
     def post_process(rows: list[dict]) -> list[dict]:
         out: list[dict] = []
@@ -165,6 +200,16 @@ class OracleJob4(OracleJob):
             post_process=self.post_process,
         )
 
+    def makeQuery(self, cfg: dict[str, Any]) -> str:
+        cond = str((cfg.get("query_filters", {}) or {}).get("job4", "")).strip()
+        if not cond:
+            return self.sql
+        return f"""
+            SELECT *
+            FROM ({self.sql})
+            WHERE {cond}
+        """
+
     @staticmethod
     def post_process(rows: list[dict]) -> list[dict]:
         out: list[dict] = []
@@ -194,6 +239,16 @@ class OracleJob5(OracleJob):
             test_rows=1000,
             post_process=self.post_process,
         )
+
+    def makeQuery(self, cfg: dict[str, Any]) -> str:
+        cond = str((cfg.get("query_filters", {}) or {}).get("job5", "")).strip()
+        if not cond:
+            return self.sql
+        return f"""
+            SELECT *
+            FROM ({self.sql})
+            WHERE {cond}
+        """
 
     @staticmethod
     def post_process(rows: list[dict], context: PostProcessContext) -> list[dict]:
