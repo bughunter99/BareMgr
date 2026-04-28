@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_DIR="${SCRIPT_DIR}/.baremgr"
+PYTHON_BIN="${BAREMGR_PYTHON:-python3}"
+
+usage() {
+    echo "Usage: $(basename "$0") <config-file>"
+    echo "Example: $(basename "$0") config_app_node1.yml"
+}
+
+if [[ $# -lt 1 ]]; then
+    usage
+    exit 1
+fi
+
+CONFIG_INPUT="$1"
+if [[ "${CONFIG_INPUT}" = /* ]]; then
+    CONFIG_PATH="${CONFIG_INPUT}"
+else
+    CONFIG_PATH="${SCRIPT_DIR}/${CONFIG_INPUT}"
+fi
+
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+    echo "Config not found: ${CONFIG_PATH}" >&2
+    exit 1
+fi
+
+mkdir -p "${STATE_DIR}"
+
+CONFIG_HASH="$(printf '%s' "${CONFIG_PATH}" | cksum | awk '{print $1}')"
+STATE_FILE="${STATE_DIR}/run_${CONFIG_HASH}.state"
+LAST_FILE="${STATE_DIR}/last_started.state"
+CONSOLE_LOG="${STATE_DIR}/$(basename "${CONFIG_PATH}").console.log"
+
+if [[ -f "${STATE_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${STATE_FILE}"
+    if [[ -n "${PID:-}" ]] && kill -0 "${PID}" 2>/dev/null; then
+        echo "BareMgr is already running for config ${CONFIG_PATH} (pid=${PID})" >&2
+        exit 1
+    fi
+    rm -f "${STATE_FILE}"
+fi
+
+nohup "${PYTHON_BIN}" "${SCRIPT_DIR}/main.py" --config "${CONFIG_PATH}" >"${CONSOLE_LOG}" 2>&1 &
+PID="$!"
+STARTED_AT="$(date '+%Y-%m-%d %H:%M:%S')"
+
+cat > "${STATE_FILE}" <<EOF
+PID='${PID}'
+CONFIG_PATH='${CONFIG_PATH}'
+CONSOLE_LOG='${CONSOLE_LOG}'
+STARTED_AT='${STARTED_AT}'
+EOF
+
+cp "${STATE_FILE}" "${LAST_FILE}"
+
+echo "BareMgr started"
+echo "  pid        : ${PID}"
+echo "  config     : ${CONFIG_PATH}"
+echo "  console log: ${CONSOLE_LOG}"

@@ -9,7 +9,7 @@ main.py — 실행 진입점.
 
 import argparse
 
-from app import App
+from src.app import App
 
 
 def parse_args() -> argparse.Namespace:

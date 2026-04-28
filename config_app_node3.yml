@@ -2,6 +2,7 @@ node_id: node3
 weight: 80
 
 failover:
+  backend: zmq
   port: 5559
   heartbeat_interval: 1
   fail_after_missed_heartbeats: 2
@@ -9,12 +10,37 @@ failover:
   peers:
     - 127.0.0.1:5555
     - 127.0.0.1:5557
+  db:
+    dsn: user/password@192.168.1.100:1521/ORCL
+    table: FAILOVER_NODES
+    ensure_table: true
+    columns:
+      node_id: NODE_ID
+      weight: WEIGHT
+      status: STATUS
+      last_seen: LAST_SEEN
+      updated_at: UPDATED_AT
+    command:
+      table: FAILOVER_COMMANDS
+      ensure_table: true
+      poll_interval_sec: 1
+      columns:
+        command_id: COMMAND_ID
+        node_id: NODE_ID
+        command: COMMAND
+        created_at: CREATED_AT
+        processed_at: PROCESSED_AT
 
 logging:
   log_base: logs/app_node3
 
 sqlite:
   path: data/app3
+
+oracle_client:
+  lib_dir: ""
+  config_dir: ""
+  driver_name: BareMgr
 
 replication:
   port: 5560
@@ -25,6 +51,102 @@ replication:
   peers:
     - 127.0.0.1:5556
     - 127.0.0.1:5558
+
+pipeline:
+  processing:
+    enabled: true
+    interval_sec: 300
+    run_on_active_only: true
+    worker_mode: thread
+    workers: 20
+    batch_min: 6000
+    batch_max: 8000
+    source_oracle:
+      enabled: true
+      dsn: user/password@192.168.1.100:1521/ORCL
+      sql: SELECT id, updated_at, name, qty FROM inventory ORDER BY updated_at DESC
+      limit: 8000
+    input_limit_per_table: 500
+    output_table: pipeline_generated_objects
+    object_log:
+      db_path: data/app3/pipeline/object_results.db
+    drone:
+      enabled: false
+      dry_run: true
+      url: http://drone.local/api/messages
+      timeout_sec: 5
+      auth_token: ""
+      headers: {}
+    current_oracle:
+      enabled: false
+      dsn: user/password@192.168.1.100:1521/ORCL
+      sql: SELECT id, updated_at FROM inventory ORDER BY updated_at DESC
+      limit: 1000
+    oracle_pool:
+      enabled: false
+      user: user
+      password: password
+      dsn: 192.168.1.100:1521/ORCL
+      min: 2
+      max: 10
+      increment: 1
+      threaded: true
+      getmode: wait
+    worker_oracle_lookup:
+      enabled: false
+      sql: SELECT id, updated_at FROM inventory WHERE id = :lookup_key
+      bind_key: lookup_key
+      object_field: batch_index
+      limit: 1
+    oracle_write:
+      enabled: false
+      dry_run: true
+      dsn: user/password@192.168.1.100:1521/ORCL
+      table: PIPELINE_RESULTS
+      ensure_table: true
+  sync:
+    enabled: false
+    interval_sec: 600
+    run_on_active_only: true
+    workers: 1
+    mode: incremental
+    dry_run: true
+    source_dsn: user/password@192.168.1.100:1521/ORCL
+    target_dsn: user/password@192.168.1.101:1521/ORCL
+    tables:
+      - INVENTORY
+      - ORDERS
+      - AUDIT_EVENTS
+    key_column: ID
+    timestamp_column: UPDATED_AT
+    batch_size: 500
+    ensure_table: false
+    checkpoint_db: data/app3/pipeline/sync_checkpoint.db
+  etc:
+    enabled: true
+    interval_sec: 60
+    run_on_active_only: true
+    workers: 1
+    sqlite_log:
+      db_path: data/app3/pipeline/etc_runs.db
+    oracle:
+      dsn: user/password@192.168.1.100:1521/ORCL
+    tasks:
+      - name: etc-heartbeat
+        type: sqlite_heartbeat
+        enabled: true
+        interval_sec: 60
+        table: etc_heartbeat
+      - name: purge-object-results
+        type: sqlite_purge_table
+        enabled: true
+        interval_sec: 300
+        table: object_results
+        retention_minutes: 1440
+      - name: oracle-probe
+        type: oracle_probe
+        enabled: false
+        interval_sec: 300
 
 collectors:
   oracle:

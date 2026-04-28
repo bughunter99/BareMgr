@@ -1,0 +1,16 @@
+cx_Oracle을 사용하는데, 파이썬 상위버전에서는 이게 안될 수도 있어서 oracledb as cx_Oracle 이런게 import해주고, 프로그램 처음 시작할때, cx_Oracle.init_oracle_client()를 추가해서 다른 여러 멀티 프로세스들도 초기화할 수 있게 해줘.
+또, 5초마다 각 collector, main job worker들 상태, sync 상태, etc 상태등을 알 수 있게 그 failover 관련해서 weight이랑 관련 상태 남기는 로그에 앞에 main job들 queue count등을 남기게 해줘.
+
+collector나 main job에서 접속할 oracle 디비들이 여러개거든. 대충 5개 정도? 이걸 각각 connection을 가지면 복잡하니까 connection manager? 이런 개념을 써서 정리할 수 있는건 정리해줘. 그게 나을꺼 같아.
+
+이 프로그램을 linux에서 start하고 stop하는 script를 만들어줘. 이름은 ProdBaremgrStart, ProdBaremgrStop 이렇게 이 스크립트에서는 start한 config를 읽어서 start하고 stop도 그렇게 할 수 있게 해줘.
+
+oracle에서 데이터를 select해서 가져올땐, makeDictFactory(cursor) 이런 함수를 통해서 모두 list of dict 형식으로 처리할 수 있게 해줘. 이 안에서 cursor.description으로 column 이름을 가져오고 dict(zip(columnnames, args)) 이런 코드로 간단하게 리턴하게 해주면 되.
+
+여러 main job worker가 queue에서 job을 꺼내 하나씩 처리할텐데, 이때 job id로 구분해서 logging하게 해줘. 어떤 entry를 queue에서 꺼냈는지부터 로깅하면 될꺼야.
+
+SplunkSearch 함수도 만들어줘. splunk 쿼리할때, SplunkSearch(query) 이런 함수가 있어서 이 안에서는 BASE_URL, CREDENTIAL_KEY, SPLUNK_TOKEN과 query 명령어로 splunk 쿼리해서 결과를 리턴하게끔.
+
+여기 만든 클래스들의 관계와 데이터 흐름도를 doc 폴더를 만들어서 각각 svg 파일로 만들어줘.
+
+

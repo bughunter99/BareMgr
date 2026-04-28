@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080">
+  <defs>
+    <style>
+      .title { font: 700 26px 'Arial', sans-serif; fill: #0f172a; }
+      .subtitle { font: 500 14px 'Arial', sans-serif; fill: #334155; }
+      .box-title { font: 700 14px 'Arial', sans-serif; fill: #0f172a; }
+      .box-text { font: 500 12px 'Arial', sans-serif; fill: #334155; }
+      .edge { stroke: #334155; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+      .edge2 { stroke: #0f766e; stroke-width: 2.2; fill: none; marker-end: url(#arrow2); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155" />
+    </marker>
+    <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0f766e" />
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="1080" fill="#f8fafc"/>
+  <text x="40" y="50" class="title">BareMgr 데이터 흐름도</text>
+  <text x="40" y="78" class="subtitle">Active/Standby 수집, 처리, 복제, 동기화 실행 흐름</text>
+
+  <!-- Role and Scheduler -->
+  <rect x="60" y="120" width="300" height="100" rx="14" ry="14" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="80" y="152" class="box-title">FailoverNode</text>
+  <text x="80" y="175" class="box-text">heartbeat / leader election</text>
+  <text x="80" y="194" class="box-text">ACTIVE or STANDBY 결정</text>
+
+  <rect x="420" y="120" width="300" height="100" rx="14" ry="14" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="440" y="152" class="box-title">AppOrchestrator</text>
+  <text x="440" y="175" class="box-text">processing / sync / etc 주기 실행</text>
+
+  <!-- Collectors -->
+  <rect x="60" y="280" width="300" height="120" rx="14" ry="14" fill="#ecfccb" stroke="#65a30d" stroke-width="2"/>
+  <text x="80" y="312" class="box-title">OracleCollector / SplunkCollector</text>
+  <text x="80" y="335" class="box-text">ACTIVE일 때 query 수행</text>
+  <text x="80" y="354" class="box-text">rows(list[dict]) 생성</text>
+  <text x="80" y="373" class="box-text">Store.upsert + on_collect callback</text>
+
+  <rect x="420" y="280" width="300" height="120" rx="14" ry="14" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <text x="440" y="312" class="box-title">Store (SQLite)</text>
+  <text x="440" y="335" class="box-text">수집 결과 로컬 저장</text>
+  <text x="440" y="354" class="box-text">processing/sync/etc 공통 데이터 소스</text>
+
+  <rect x="780" y="280" width="300" height="120" rx="14" ry="14" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+  <text x="800" y="312" class="box-title">Replicator (Active→Standby)</text>
+  <text x="800" y="335" class="box-text">publish(table, rows) via ZMQ PUSH</text>
+  <text x="800" y="354" class="box-text">Standby 수신 후 Store 반영</text>
+
+  <!-- Processing -->
+  <rect x="60" y="460" width="460" height="180" rx="14" ry="14" fill="#f5d0fe" stroke="#a21caf" stroke-width="2"/>
+  <text x="80" y="492" class="box-title">ProcessingPipeline (main job)</text>
+  <text x="80" y="515" class="box-text">1) source/current Oracle + Store rows 로 object 생성</text>
+  <text x="80" y="534" class="box-text">2) internal queue 적재</text>
+  <text x="80" y="553" class="box-text">3) N workers 가 dequeue (job_id 기반 로그)</text>
+  <text x="80" y="572" class="box-text">4) result 생성 + worker oracle lookup(optional)</text>
+  <text x="80" y="591" class="box-text">5) output_table 저장 + object_log + drone + oracle_write</text>
+  <text x="80" y="610" class="box-text">(OracleConnectionManager / SessionPool 재사용)</text>
+
+  <rect x="560" y="460" width="240" height="180" rx="14" ry="14" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+  <text x="580" y="492" class="box-title">Oracle Sources</text>
+  <text x="580" y="515" class="box-text">- source_oracle</text>
+  <text x="580" y="534" class="box-text">- current_oracle</text>
+  <text x="580" y="553" class="box-text">- worker_lookup</text>
+  <text x="580" y="572" class="box-text">- oracle_write</text>
+
+  <rect x="840" y="460" width="240" height="180" rx="14" ry="14" fill="#fae8ff" stroke="#a21caf" stroke-width="2"/>
+  <text x="860" y="492" class="box-title">Processing Outputs</text>
+  <text x="860" y="515" class="box-text">- Store output_table</text>
+  <text x="860" y="534" class="box-text">- ObjectResultLogger(SQLite)</text>
+  <text x="860" y="553" class="box-text">- DroneClient(HTTP)</text>
+  <text x="860" y="572" class="box-text">- OracleResultWriter</text>
+
+  <!-- Sync / Etc -->
+  <rect x="60" y="700" width="460" height="140" rx="14" ry="14" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="80" y="732" class="box-title">SyncJobManager / SyncOracleToOracle</text>
+  <text x="80" y="755" class="box-text">주기 실행 시 source Oracle → target Oracle 동기화</text>
+  <text x="80" y="774" class="box-text">checkpoint DB로 incremental 위치 관리</text>
+  <text x="80" y="793" class="box-text">workers 기반 테이블 병렬 처리</text>
+
+  <rect x="560" y="700" width="520" height="140" rx="14" ry="14" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <text x="580" y="732" class="box-title">EtcManager</text>
+  <text x="580" y="755" class="box-text">task 실행: sqlite_heartbeat / sqlite_purge / oracle_probe</text>
+  <text x="580" y="774" class="box-text">workers 기반 task 병렬 + etc_runs 로그 기록</text>
+  <text x="580" y="793" class="box-text">oracle_probe는 OracleConnectionManager 연결 재사용</text>
+
+  <!-- Shared managers -->
+  <rect x="1140" y="460" width="360" height="120" rx="14" ry="14" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1160" y="492" class="box-title">OracleConnectionManager / SessionPool</text>
+  <text x="1160" y="515" class="box-text">DSN별 연결 공유, validate, close_all</text>
+  <text x="1160" y="534" class="box-text">collector/processing/etc 연결 복잡도 축소</text>
+
+  <rect x="1140" y="700" width="360" height="140" rx="14" ry="14" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+  <text x="1160" y="732" class="box-title">Runtime Observability</text>
+  <text x="1160" y="755" class="box-text">Failover status_interval 로그에 runtime 상태 포함</text>
+  <text x="1160" y="774" class="box-text">main_queue, processing workers, collectors, sync, etc</text>
+  <text x="1160" y="793" class="box-text">job_context(JID) 기반 entry 추적 로그</text>
+
+  <!-- Edges -->
+  <path class="edge" d="M360 170 L420 170"/>
+  <path class="edge" d="M210 220 L210 280"/>
+  <path class="edge" d="M360 340 L420 340"/>
+  <path class="edge" d="M720 340 L780 340"/>
+
+  <path class="edge2" d="M210 400 L210 460"/>
+  <path class="edge2" d="M520 550 L560 550"/>
+  <path class="edge2" d="M800 550 L840 550"/>
+  <path class="edge2" d="M1080 550 L1140 550"/>
+
+  <path class="edge" d="M420 170 L290 700"/>
+  <path class="edge" d="M420 170 L800 700"/>
+
+  <path class="edge" d="M520 760 L560 760"/>
+  <path class="edge" d="M1080 770 L1140 770"/>
+
+  <path class="edge" d="M230 220 L1320 700"/>
+
+  <!-- Legend -->
+  <rect x="1140" y="120" width="360" height="250" rx="12" ry="12" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="1160" y="152" class="box-title">Flow 설명</text>
+  <text x="1160" y="178" class="box-text">1. Failover가 Active 역할을 결정</text>
+  <text x="1160" y="198" class="box-text">2. Active에서 Collector가 데이터 수집/저장</text>
+  <text x="1160" y="218" class="box-text">3. Replicator가 Standby로 복제</text>
+  <text x="1160" y="238" class="box-text">4. Orchestrator가 processing/sync/etc 실행</text>
+  <text x="1160" y="258" class="box-text">5. Processing은 queue-worker 파이프라인 처리</text>
+  <text x="1160" y="278" class="box-text">6. 결과는 SQLite/HTTP/Oracle로 fan-out</text>
+  <text x="1160" y="298" class="box-text">7. Sync/Etc는 별도 주기 작업 수행</text>
+  <text x="1160" y="318" class="box-text">8. 상태와 JID 로그로 실행 추적</text>
+
+  <line x1="1160" y1="344" x2="1220" y2="344" class="edge"/>
+  <text x="1230" y="348" class="box-text">일반 제어/데이터 흐름</text>
+  <line x1="1160" y1="364" x2="1220" y2="364" class="edge2"/>
+  <text x="1230" y="368" class="box-text">Processing 핵심 데이터 경로</text>
+</svg>
