@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .config_loader import load_config
-from .failover_db import send_stop_db
+from .failovernodedb import send_stop_db
 
 
 def parse_args() -> argparse.Namespace:

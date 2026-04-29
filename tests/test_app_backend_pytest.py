@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from src.app import App
-from src.failover_db import FailoverNodeDb
-from src.failover_zmq import FailoverNodeZmq
+from src.failovernodedb import FailoverNodeDb
+from src.failovernodezmq import FailoverNodeZmq
 
 
 def _base_cfg(backend: str, base_dir: Path) -> str:

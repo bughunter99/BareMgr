@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from .basecollector import BaseCollector
 from .db_registry import resolve_dsn, resolve_pool_cfg
-from .oracle_connection_manager import OracleConnectionManager
+from .oracleconnectionmanager import OracleConnectionManager
 from .oracle_jobs import ORACLE_JOBS, OracleJob
 from .oracle_utils import validate_oracle_connection
 

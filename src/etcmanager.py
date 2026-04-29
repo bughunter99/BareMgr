@@ -12,7 +12,7 @@ from typing import Any
 
 from .db_registry import build_registry, resolve_dsn, resolve_pool_cfg
 from .logger import Logger
-from .oracle_connection_manager import OracleConnectionManager
+from .oracleconnectionmanager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
 from .oracle_utils import validate_oracle_connection
 from .store import Store

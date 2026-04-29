@@ -1,7 +1,7 @@
 import sys
 from types import SimpleNamespace
 
-from src.oracle_connection_manager import OracleConnectionManager
+from src.oracleconnectionmanager import OracleConnectionManager
 
 
 def test_oracle_connection_manager_reuses_same_dsn(monkeypatch) -> None:

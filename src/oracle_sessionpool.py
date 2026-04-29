@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from .logger import Logger
-from .oracle_connection_manager import OracleConnectionManager
+from .oracleconnectionmanager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
 
 

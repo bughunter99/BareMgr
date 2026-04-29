@@ -8,7 +8,7 @@ from typing import Any, Iterable
 
 from .db_registry import build_registry, resolve_dsn
 from .logger import Logger
-from .oracle_connection_manager import OracleConnectionManager
+from .oracleconnectionmanager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
 from .oracle_utils import validate_oracle_connection
 from .processing import ProcessingBase

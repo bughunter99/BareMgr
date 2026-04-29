@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .config_loader import load_config
-from .failover_zmq import send_stop
+from .failovernodezmq import send_stop
 
 
 def parse_args() -> argparse.Namespace:

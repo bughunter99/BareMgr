@@ -32,10 +32,10 @@ from .config_loader import load_config
 from .db_registry import build_registry
 from .etcmanager import EtcManager
 from .failovernode import FailoverNode
-from .failover_db import FailoverNodeDb
-from .failover_zmq import FailoverNodeZmq
+from .failovernodedb import FailoverNodeDb
+from .failovernodezmq import FailoverNodeZmq
 from .logger import Logger
-from .oracle_connection_manager import OracleConnectionManager
+from .oracleconnectionmanager import OracleConnectionManager
 from .oracle_collector import OracleCollector
 from .oracle_driver import init_oracle_client_from_config
 from .apporchestrator import AppOrchestrator
