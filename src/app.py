@@ -27,7 +27,7 @@ import time
 import re
 from typing import Any
 
-from .collector import BaseCollector
+from .basecollector import BaseCollector
 from .config_loader import load_config
 from .db_registry import build_registry
 from .etcmanager import EtcManager
@@ -39,7 +39,7 @@ from .oracle_connection_manager import OracleConnectionManager
 from .oracle_collector import OracleCollector
 from .oracle_driver import init_oracle_client_from_config
 from .apporchestrator import AppOrchestrator
-from .business import BusinessManager
+from .businessmanager import BusinessManager
 from .replicator import Replicator
 from .splunk_collector import SplunkCollector
 from .store import Store

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import time
 from typing import TYPE_CHECKING
 
-from .collector import BaseCollector
+from .basecollector import BaseCollector
 from .splunk_jobs import SPLUNK_JOBS, SplunkJob
 from .splunk_search import SplunkSearch, configure_splunk_search
 

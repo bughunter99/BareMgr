@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from src.logger import Logger
 from src.oracle_connection_manager import OracleConnectionManager
 from src.oracle_collector import OracleCollector
-from src.business import ProcessingPipeline
+from src.businessmanager import ProcessingPipeline
 from src.store import Store
 
 

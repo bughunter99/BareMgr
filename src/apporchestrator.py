@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from .logger import Logger
 
 if TYPE_CHECKING:
-    from .collector import BaseCollector
+    from .basecollector import BaseCollector
     from .replicator import Replicator
 
 
