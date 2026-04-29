@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-splunk_collector.py — Splunk 주기 수집기.
+splunkcollector.py — Splunk 주기 수집기.
 
 · splunklib(splunk-sdk) 패키지를 사용한다.
 · 수집 잡은 splunk_jobs.py의 SPLUNK_JOBS에 코드로 정의한다.
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from .basecollector import BaseCollector
 from .splunk_jobs import SPLUNK_JOBS, SplunkJob
-from .splunk_search import SplunkSearch, configure_splunk_search
+from .splunksearch import SplunkSearch, configure_splunk_search
 
 if TYPE_CHECKING:
     from .store import Store

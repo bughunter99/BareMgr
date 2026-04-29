@@ -2,9 +2,9 @@ from types import SimpleNamespace
 import sys
 
 from src.logger import Logger
-import src.oracle_collector as oracle_collector_module
-from src.oracle_collector import OracleCollector
-from src.oracle_jobs import OracleJob
+import src.oraclecollector as oracle_collector_module
+from src.oraclecollector import OracleCollector
+from src.oraclejobs import OracleJob
 from src.oracle_utils import makeDictFactory
 from src.store import Store
 

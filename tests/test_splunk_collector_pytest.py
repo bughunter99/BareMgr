@@ -1,6 +1,6 @@
 from src.logger import Logger
-import src.splunk_collector as splunk_collector_module
-from src.splunk_collector import SplunkCollector
+import src.splunkcollector as splunk_collector_module
+from src.splunkcollector import SplunkCollector
 from src.splunk_jobs import SplunkJob
 from src.store import Store
 

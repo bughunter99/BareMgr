@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-oracle_collector.py — Oracle DB 주기 수집기.
+oraclecollector.py — Oracle DB 주기 수집기.
 
-· 수집 잡은 oracle_jobs.py의 ORACLE_JOBS에 코드로 정의한다.
+· 수집 잡은 oraclejobs.py의 ORACLE_JOBS에 코드로 정의한다.
 · 각 잡은 db alias를 지정해 서로 다른 DB에서 조회할 수 있다.
 · 각 잡은 query(config, cursor) 함수에서 SQL 실행/바인딩/결과 가공을 처리한다.
 · 한 잡에서 예외가 나도 로그만 남기고 다음 잡을 계속 처리한다.
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from .basecollector import BaseCollector
 from .db_registry import resolve_dsn, resolve_pool_cfg
 from .oracleconnectionmanager import OracleConnectionManager
-from .oracle_jobs import ORACLE_JOBS, OracleJob
+from .oraclejobs import ORACLE_JOBS, OracleJob
 from .oracle_utils import validate_oracle_connection
 
 if TYPE_CHECKING:

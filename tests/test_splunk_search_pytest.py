@@ -1,4 +1,4 @@
-from src.splunk_search import SplunkSearch, configure_splunk_search
+from src.splunksearch import SplunkSearch, configure_splunk_search
 
 
 def test_splunk_search_posts_query_and_parses_results(monkeypatch) -> None:
@@ -34,7 +34,7 @@ def test_splunk_search_posts_query_and_parses_results(monkeypatch) -> None:
         captured["body"] = req.data.decode("utf-8")
         return FakeResponse()
 
-    monkeypatch.setattr("src.splunk_search.urlrequest.urlopen", fake_urlopen)
+    monkeypatch.setattr("src.splunksearch.urlrequest.urlopen", fake_urlopen)
 
     rows = SplunkSearch("index=main level=ERROR | table host, message")
 

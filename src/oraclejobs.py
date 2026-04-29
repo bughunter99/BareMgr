@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-oracle_jobs.py — OracleCollector가 실행할 수집 잡 코드 정의.
+oraclejobs.py — OracleCollector가 실행할 수집 잡 코드 정의.
 
 각 OracleJob 필드:
     name      : 잡 식별자 (로그·체크포인트에 사용)
