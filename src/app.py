@@ -30,20 +30,20 @@ from typing import Any
 from .collector import BaseCollector
 from .config_loader import load_config
 from .db_registry import build_registry
-from .etc import EtcManager
-from .failover import FailoverNode
+from .etcmanager import EtcManager
+from .failovernode import FailoverNode
 from .failover_db import FailoverNodeDb
 from .failover_zmq import FailoverNodeZmq
 from .logger import Logger
 from .oracle_connection_manager import OracleConnectionManager
 from .oracle_collector import OracleCollector
 from .oracle_driver import init_oracle_client_from_config
-from .orchestrator import AppOrchestrator
-from .processing import ProcessingPipeline
+from .apporchestrator import AppOrchestrator
+from .business import BusinessManager
 from .replicator import Replicator
 from .splunk_collector import SplunkCollector
 from .store import Store
-from .sync import SyncJobManager
+from .sync import SyncManager
 
 
 class App:
@@ -85,13 +85,17 @@ class App:
             store=self._store,
             logger=self._logger,
         )
-        self._processing_pipeline = ProcessingPipeline(
+        self._processing_pipeline = BusinessManager(
             cfg=self._cfg,
             store=self._store,
             logger=self._logger,
             connection_manager=self._oracle_connection_manager,
         )
-        self._sync_manager = SyncJobManager(cfg=self._cfg, logger=self._logger, connection_manager=self._oracle_connection_manager)
+        self._sync_manager = SyncManager(
+            cfg=self._cfg,
+            logger=self._logger,
+            connection_manager=self._oracle_connection_manager,
+        )
         self._etc_manager = EtcManager(
             cfg=self._cfg,
             store=self._store,

@@ -61,7 +61,7 @@ def test_app_selects_db_backend(tmp_path: Path) -> None:
         app.stop()
 
 
-  def test_app_initializes_oracle_client_on_start(tmp_path: Path, monkeypatch) -> None:
+def test_app_initializes_oracle_client_on_start(tmp_path: Path, monkeypatch) -> None:
     cfg_file = tmp_path / "cfg_zmq.yml"
     cfg_file.write_text(_base_cfg("zmq", tmp_path), encoding="utf-8")
 
@@ -75,22 +75,22 @@ def test_app_selects_db_backend(tmp_path: Path) -> None:
 
     app = App(config_file=str(cfg_file))
     try:
-      assert called_with == ["node-test"]
+        assert called_with == ["node-test"]
     finally:
-      app.stop()
+        app.stop()
 
 
-  def test_app_builds_failover_runtime_status(tmp_path: Path) -> None:
+def test_app_builds_failover_runtime_status(tmp_path: Path) -> None:
     cfg_file = tmp_path / "cfg_zmq.yml"
     cfg_file.write_text(_base_cfg("zmq", tmp_path), encoding="utf-8")
 
     app = App(config_file=str(cfg_file))
     try:
-      status = app._build_failover_runtime_status()
-      assert "main_queue=" in status
-      assert "processing=" in status
-      assert "sync=" in status
-      assert "etc=" in status
-      assert "collectors=[none]" in status
+        status = app._build_failover_runtime_status()
+        assert "main_queue=" in status
+        assert "processing=" in status
+        assert "sync=" in status
+        assert "etc=" in status
+        assert "collectors=[none]" in status
     finally:
-      app.stop()
+        app.stop()

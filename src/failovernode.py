@@ -131,6 +131,3 @@ class FailoverNode(ABC):
 
     def _cleanup(self) -> None:
         pass
-
-
-FailoverNode = Failovernode

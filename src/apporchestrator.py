@@ -34,13 +34,16 @@ class _PeriodicJobRunner:
         self._thread: threading.Thread | None = None
         self._next_run_at = 0.0
         self._lock = threading.Lock()
+        self._wakeup = threading.Event()
 
     def start(self) -> None:
         if not self.enabled or self._running:
             return
 
         self._running = True
-        self._next_run_at = time.monotonic() + self.interval_sec
+        # Start loop without forcing an initial full interval wait.
+        self._next_run_at = time.monotonic()
+        self._wakeup.set()
         self._thread = threading.Thread(
             target=self._loop,
             daemon=True,
@@ -55,10 +58,16 @@ class _PeriodicJobRunner:
         )
 
     def set_active(self, is_active: bool) -> None:
+        became_active = not self._active and is_active
         self._active = is_active
+        if became_active and self.enabled:
+            # Trigger an immediate run when role changes to ACTIVE.
+            self._next_run_at = time.monotonic()
+            self._wakeup.set()
 
     def stop(self) -> None:
         self._running = False
+        self._wakeup.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         if self.enabled:
@@ -68,7 +77,8 @@ class _PeriodicJobRunner:
         while self._running:
             now = time.monotonic()
             if now < self._next_run_at:
-                time.sleep(min(1.0, self._next_run_at - now))
+                self._wakeup.wait(timeout=min(1.0, self._next_run_at - now))
+                self._wakeup.clear()
                 continue
 
             self._next_run_at = now + self.interval_sec

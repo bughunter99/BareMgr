@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from src.logger import Logger
-from src.processing import ProcessingPipeline
+from src.business import ProcessingPipeline
 from src.store import Store
 
 

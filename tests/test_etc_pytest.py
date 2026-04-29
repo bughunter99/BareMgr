@@ -3,7 +3,7 @@ import sqlite3
 from types import SimpleNamespace
 import sys
 
-from src.etc import EtcManager
+from src.etcmanager import EtcManager
 from src.logger import Logger
 from src.store import Store
 
@@ -93,7 +93,7 @@ def test_etc_workers_come_from_config(tmp_path: Path, monkeypatch) -> None:
 
             return DoneFuture()
 
-    monkeypatch.setattr("src.etc.ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr("src.etcmanager.ThreadPoolExecutor", FakeExecutor)
 
     mgr = EtcManager(cfg=cfg, store=store, logger=log)
     try:

@@ -6,7 +6,7 @@ import re
 import threading
 import time
 
-from .failover import FailoverNode
+from .failovernode import FailoverNode
 from .logger import Logger
 from .oracle_driver import get_cx_oracle
 

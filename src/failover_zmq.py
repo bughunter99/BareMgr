@@ -6,7 +6,7 @@ import time
 
 import zmq
 
-from .failover import FailoverNode
+from .failovernode import FailoverNode
 from .logger import Logger
 
 
