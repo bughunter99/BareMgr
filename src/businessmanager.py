@@ -4,7 +4,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from .businessqueries import QueryAAA, QueryBBB, QueryCCC, QueryDDD, QueryEEE
+from .queryaaa import QueryAAA
+from .querybbb import QueryBBB
+from .queryccc import QueryCCC
+from .queryddd import QueryDDD
+from .queryeee import QueryEEE
 from .db_registry import build_registry, resolve_dsn
 from .logger import Logger
 from .oracleconnectionmanager import OracleConnectionManager
