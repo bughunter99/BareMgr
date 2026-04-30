@@ -20,7 +20,6 @@ Architecture
 
 - 멀티스레딩: 모든 스레드가 동일 QueueHandler를 사용 → 큐에서 직렬화
 - 멀티프로세싱: 자식 프로세스도 같은 큐(multiprocessing.Queue)를 공유
-                → init_worker_logger() 사용
 """
 
 import logging
@@ -28,6 +27,7 @@ import logging.handlers
 import multiprocessing
 import threading
 import sys
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -60,6 +60,13 @@ class _JobContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.jid = _current_jid.get()
         return True
+
+
+class _CompactTimestampFormatter(logging.Formatter):
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        current = self.converter(record.created)
+        stamp = time.strftime("%Y%m%d %H%M%S", current)
+        return f"{stamp}.{int(record.msecs):03d}"
 
 
 # ══════════════════════════════════════════════
@@ -152,12 +159,6 @@ class Logger:
     logger.info("메시지")
     logger.error("에러")
 
-    # 자식 프로세스
-    pool = multiprocessing.Pool(
-        initializer=init_worker_logger,
-        initargs=(logger.queue, "app"),
-    )
-
     # 종료
     logger.stop()
     """
@@ -173,7 +174,7 @@ class Logger:
             "%(name)s - %(message)s"
         ),
         encoding: str  = "utf-8",
-        console: bool  = True,
+        console: bool  = False,
     ) -> None:
         self.name     = name
         self.log_base = log_base
@@ -186,7 +187,7 @@ class Logger:
         self._queue: multiprocessing.Queue = multiprocessing.Queue(-1)
 
         # ── 핸들러 구성 ───────────────────────
-        formatter = logging.Formatter(fmt)
+        formatter = _CompactTimestampFormatter(fmt)
         handlers: list[logging.Handler] = []
 
         if console:
@@ -273,31 +274,3 @@ class Logger:
 
     def log(self, level: int, msg: str, *args, **kwargs) -> None:
         self._logger.log(level, msg, *args, **kwargs)
-
-
-# ══════════════════════════════════════════════
-# 자식 프로세스 초기화 헬퍼
-# ══════════════════════════════════════════════
-def init_worker_logger(
-    queue: multiprocessing.Queue,
-    name: str  = "app",
-    level: int = logging.DEBUG,
-) -> logging.Logger:
-    """
-    multiprocessing.Pool(initializer=...) 또는 Process 내부에서 호출.
-    자식 프로세스의 logger를 QueueHandler만 사용하도록 초기화한다.
-
-    사용 예:
-        pool = multiprocessing.Pool(
-            initializer=init_worker_logger,
-            initargs=(logger.queue, "app"),
-        )
-    """
-    root = logging.getLogger(name)
-    root.handlers.clear()
-    root.filters.clear()
-    root.setLevel(level)
-    root.propagate = False
-    root.addFilter(_JobContextFilter())
-    root.addHandler(logging.handlers.QueueHandler(queue))
-    return root

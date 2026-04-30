@@ -18,10 +18,25 @@ import threading
 import time
 import random
 
-from src.logger import Logger, init_worker_logger
+from src.logger import Logger
 
 
 LOG_BASE = "logs/app"   # 파일명: logs/app.{YYYYMMDDHH}
+
+
+def _init_example_worker_logger(
+    queue: multiprocessing.Queue,
+    name: str = "app",
+    level: int = logging.DEBUG,
+) -> logging.Logger:
+    """예제용 워커 프로세스 logger 초기화."""
+    root = logging.getLogger(name)
+    root.handlers.clear()
+    root.filters.clear()
+    root.setLevel(level)
+    root.propagate = False
+    root.addHandler(logging.handlers.QueueHandler(queue))
+    return root
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -60,7 +75,7 @@ def demo_multithreading() -> None:
 # 예제 2 : 멀티프로세싱 - Pool + QueueHandler
 # ══════════════════════════════════════════════════════════════════
 def process_worker(task_id: int) -> int:
-    """Pool 워커: init_worker_logger로 루트 logger에 QueueHandler 등록"""
+    """Pool 워커: 루트 logger에 QueueHandler 등록"""
     log = logging.getLogger("mp_demo")
     log.info(f"[Process Worker {task_id}] 작업 시작 (PID={multiprocessing.current_process().pid})")
 
@@ -81,7 +96,7 @@ def demo_multiprocessing() -> None:
     try:
         with multiprocessing.Pool(
             processes=4,
-            initializer=init_worker_logger,
+            initializer=_init_example_worker_logger,
             initargs=(logger.queue, "mp_demo", logging.DEBUG),
         ) as pool:
             tasks = list(range(12))
@@ -140,7 +155,7 @@ def demo_mixed() -> None:
 
 def _mixed_worker_entry(task_id: int, queue: multiprocessing.Queue) -> None:
     """multiprocessing.Process target - 최상위 함수여야 pickle 가능"""
-    init_worker_logger(queue, name="mixed")
+    _init_example_worker_logger(queue, name="mixed")
     mixed_process_task(task_id, queue)
 
 
