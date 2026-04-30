@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import sys
 
 from src.logger import Logger
-from src.sync import SyncJobManager, SyncOracleToOracle
+from src.syncmanager import SyncJobManager, SyncOracleToOracle
 
 
 def test_sync_manager_dry_run_no_oracle_connection(tmp_path: Path) -> None:
@@ -63,7 +63,7 @@ def test_sync_workers_come_from_config(tmp_path: Path, monkeypatch) -> None:
         def map(self, fn, items):
             return [fn(item) for item in items]
 
-    monkeypatch.setattr("src.sync.ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr("src.syncmanager.ThreadPoolExecutor", FakeExecutor)
     monkeypatch.setattr(SyncOracleToOracle, "_estimate_source_count", lambda self, table: 1)
 
     mgr = SyncJobManager(cfg=cfg, logger=log)

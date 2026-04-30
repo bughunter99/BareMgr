@@ -43,7 +43,7 @@ from .businessmanager import BusinessManager
 from .replicator import Replicator
 from .splunkcollector import SplunkCollector
 from .store import Store
-from .sync import SyncManager
+from .syncmanager import SyncManager
 
 
 class App:

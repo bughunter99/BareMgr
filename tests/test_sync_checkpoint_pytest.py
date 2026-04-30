@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.sync import SyncCheckpointStore
+from src.syncmanager import SyncCheckpointStore
 
 
 def test_sync_checkpoint_store_roundtrip(tmp_path: Path) -> None:
