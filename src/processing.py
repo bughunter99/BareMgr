@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-import queue
 import threading
 from typing import Any, Iterable
 
@@ -43,6 +43,8 @@ class ProcessingBase(ABC):
             "last_run_started_at": "",
             "last_run_completed_at": "",
         }
+        self._executor: ThreadPoolExecutor | None = None
+        self._executor_lock = threading.Lock()
 
     def run(self, ctx: dict[str, Any]) -> None:
         if not self.enabled:
@@ -61,35 +63,23 @@ class ProcessingBase(ABC):
             last_run_started_at=started_at,
         )
 
-        stop_token = object()
         items = list(self.fetch_items(ctx))
-        queue_limit = self._queue_size if self._queue_size > 0 else max(len(items), self._workers, 1)
-        work_q: queue.Queue[Any] = queue.Queue(maxsize=queue_limit)
+        self._set_status(queue_depth=len(items), queued_objects=len(items))
 
-        for item in items:
-            work_q.put(item)
-        for _ in range(self._workers):
-            work_q.put(stop_token)
+        if items:
+            executor = self._ensure_executor()
+            queue_limit = self._queue_size if self._queue_size > 0 else len(items)
+            submit_window = threading.Semaphore(max(1, min(queue_limit, len(items))))
+            futures = []
 
-        self._set_status(queue_depth=work_q.qsize(), queued_objects=len(items))
+            for item in items:
+                submit_window.acquire()
+                future = executor.submit(self._worker_once, item, ctx)
+                future.add_done_callback(lambda _f, sem=submit_window: sem.release())
+                futures.append(future)
 
-        workers = [
-            threading.Thread(
-                target=self._worker_loop,
-                args=(work_q, stop_token, ctx),
-                daemon=True,
-                name=f"{self._job_name}-worker-{i}",
-            )
-            for i in range(self._workers)
-        ]
-
-        for th in workers:
-            th.start()
-
-        work_q.join()
-
-        for th in workers:
-            th.join(timeout=1.0)
+            for future in futures:
+                future.result()
 
         completed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         self._set_status(
@@ -100,27 +90,19 @@ class ProcessingBase(ABC):
             last_run_completed_at=completed_at,
         )
 
-    def _worker_loop(self, work_q: queue.Queue[Any], stop_token: object, ctx: dict[str, Any]) -> None:
-        while True:
-            item = work_q.get()
-            if item is stop_token:
-                work_q.task_done()
-                return
+    def _worker_once(self, item: Any, ctx: dict[str, Any]) -> None:
+        self._adjust_active_workers(1)
 
-            self._adjust_active_workers(1)
-            self._set_status(queue_depth=work_q.qsize())
-
-            try:
-                self.process_item(item, ctx)
-                self._increment_status("processed")
-            except Exception as exc:
-                self._increment_status("failed")
-                self._set_status(last_error=str(exc))
-                self._logger.exception("[%s] worker failed", self._job_name)
-            finally:
-                self._adjust_active_workers(-1)
-                self._set_status(queue_depth=work_q.qsize())
-                work_q.task_done()
+        try:
+            self.process_item(item, ctx)
+            self._increment_status("processed")
+        except Exception as exc:
+            self._increment_status("failed")
+            self._set_status(last_error=str(exc))
+            self._logger.exception("[%s] worker failed", self._job_name)
+        finally:
+            self._adjust_active_workers(-1)
+            self._decrement_queue_depth()
 
     @abstractmethod
     def fetch_items(self, ctx: dict[str, Any]) -> Iterable[Any]:
@@ -135,7 +117,10 @@ class ProcessingBase(ABC):
             return dict(self._status)
 
     def close(self) -> None:
-        return
+        with self._executor_lock:
+            if self._executor is not None:
+                self._executor.shutdown(wait=True)
+                self._executor = None
 
     def _set_status(self, **updates: Any) -> None:
         with self._status_lock:
@@ -149,3 +134,17 @@ class ProcessingBase(ABC):
         with self._status_lock:
             current = int(self._status.get("active_workers", 0))
             self._status["active_workers"] = max(0, current + delta)
+
+    def _decrement_queue_depth(self) -> None:
+        with self._status_lock:
+            current = int(self._status.get("queue_depth", 0))
+            self._status["queue_depth"] = max(0, current - 1)
+
+    def _ensure_executor(self) -> ThreadPoolExecutor:
+        with self._executor_lock:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(
+                    max_workers=self._workers,
+                    thread_name_prefix=f"{self._job_name}-worker",
+                )
+            return self._executor

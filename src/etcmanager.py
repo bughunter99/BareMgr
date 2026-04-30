@@ -46,6 +46,11 @@ class EtcManager:
             "last_status": "idle",
             "last_error": "",
         }
+        self._executor: ThreadPoolExecutor | None = (
+            ThreadPoolExecutor(max_workers=self._workers)
+            if self._workers > 1
+            else None
+        )
 
         sqlite_cfg = etc_cfg.get("sqlite_log", {})
         self._etc_log_path = Path(
@@ -111,13 +116,17 @@ class EtcManager:
                 self._run_task(name=name, task=task, ctx=ctx)
             return
 
-        with ThreadPoolExecutor(max_workers=self._workers) as ex:
-            futures = [
-                ex.submit(self._run_task, name=name, task=task, ctx=ctx)
-                for name, task in due_tasks
-            ]
-            for future in futures:
-                future.result()
+        if self._executor is None:
+            for name, task in due_tasks:
+                self._run_task(name=name, task=task, ctx=ctx)
+            return
+
+        futures = [
+            self._executor.submit(self._run_task, name=name, task=task, ctx=ctx)
+            for name, task in due_tasks
+        ]
+        for future in futures:
+            future.result()
 
     def _run_task(self, name: str, task: dict[str, Any], ctx: dict[str, Any]) -> None:
         task_type = str(task.get("type", "sqlite_heartbeat")).strip().lower()
@@ -246,6 +255,11 @@ class EtcManager:
             self._etc_conn.commit()
 
     def close(self) -> None:
+        if self._executor is not None:
+            shutdown = getattr(self._executor, "shutdown", None)
+            if callable(shutdown):
+                shutdown(wait=True)
+            self._executor = None
         with self._etc_lock:
             self._etc_conn.close()
         if self._owns_connection_manager:

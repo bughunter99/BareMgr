@@ -85,7 +85,7 @@ class App:
             store=self._store,
             logger=self._logger,
         )
-        self._processing_pipeline = BusinessManager(
+        self._business_manager = BusinessManager(
             cfg=self._cfg,
             store=self._store,
             logger=self._logger,
@@ -114,7 +114,7 @@ class App:
         self._orchestrator = AppOrchestrator(
             cfg=self._cfg,
             logger=self._logger,
-            processing_callback=self._processing_pipeline.run,
+            processing_callback=self._business_manager.run,
             sync_callback=self._sync_manager.run,
             etc_callback=self._etc_manager.run,
             collectors=_collectors,
@@ -198,7 +198,7 @@ class App:
                 f"{status['name']}:{'active' if status['active'] else 'standby'}/{ 'alive' if status['thread_alive'] else 'dead'}"
             )
 
-        processing_status = self._processing_pipeline.get_status()
+        processing_status = self._business_manager.get_status()
         sync_status = self._sync_manager.get_status()
         etc_status = self._etc_manager.get_status()
 
@@ -267,7 +267,7 @@ class App:
         self._node.stop()
 
         self._orchestrator.stop()
-        self._processing_pipeline.close()
+        self._business_manager.close()
         self._etc_manager.close()
         self._oracle_connection_manager.close_all()
         self._store.close()
