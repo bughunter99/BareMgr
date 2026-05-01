@@ -7,10 +7,8 @@ store.py — Thread-safe SQLite 저장소.
 · sqlite_connections 설정이 있으면 테이블별로 특정 SQLite 파일/DDL을 적용한다.
 · 컬럼은 dict 키로부터 동적으로 추론한다.
 · upsert_many()로 배치 삽입/갱신.
-· replicate_from()으로 원격에서 받은 직렬화 데이터 그대로 저장.
 """
 
-import json
 import re
 import shutil
 import sqlite3
@@ -429,23 +427,11 @@ class Store:
             finally:
                 cur.close()
 
-    def replicate_from(self, payload: bytes) -> None:
-        """replicator가 받은 직렬화 페이로드를 그대로 저장."""
-        data: dict = json.loads(payload)
-        self.replicate_message(data)
-
     def replicate_message(self, data: dict[str, Any]) -> None:
         """역직렬화된 복제 메시지를 저장."""
         table: str = data["table"]
         rows: list[dict] = data["rows"]
         self.upsert_many(table, rows)
-
-    def serialize(self, table: str, rows: list[dict], metadata: dict[str, Any] | None = None) -> bytes:
-        """복제 전송용 직렬화."""
-        payload = {"table": table, "rows": rows}
-        if metadata:
-            payload.update(metadata)
-        return json.dumps(payload, ensure_ascii=False, default=str).encode()
 
     def query(
         self,

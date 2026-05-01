@@ -6,7 +6,7 @@ replicator.py — Active→Standby 데이터 복제기.
 ────
   [Active 노드]                    [Standby 노드]
   Replicator.publish(table, rows)
-    └─ ZMQ PUSH ──────────────► ZMQ PULL → store.replicate_from()
+        └─ ZMQ PUSH ──────────────► ZMQ PULL → store.replicate_message()
 
 · Active: Replicator.start_publisher() 호출 → PUSH 소켓으로 데이터 전송.
 · Standby: Replicator.start_subscriber() 호출 → PULL 소켓으로 수신 후 Store 저장.
@@ -66,6 +66,17 @@ class Replicator:
         self._sub_running = False
         self._sub_queue: queue.Queue[dict | None] = queue.Queue(maxsize=self._subscriber_queue_size)
 
+    @staticmethod
+    def _serialize_payload(
+        table: str,
+        rows: list[dict],
+        metadata: dict | None = None,
+    ) -> bytes:
+        payload = {"table": table, "rows": rows}
+        if metadata:
+            payload.update(metadata)
+        return json.dumps(payload, ensure_ascii=False, default=str).encode()
+
     # ── Publisher (Active 역할) ──────────────────────────────────────
     def start_publisher(self) -> None:
         """Active 전환 시 호출. 각 peer에 PUSH 소켓을 연결한다."""
@@ -103,7 +114,7 @@ class Replicator:
         with self._pub_lock:
             for chunk_index in range(chunk_count):
                 chunk_rows = rows[chunk_index * self._chunk_rows:(chunk_index + 1) * self._chunk_rows]
-                payload = self._store.serialize(
+                payload = self._serialize_payload(
                     table,
                     chunk_rows,
                     metadata={
