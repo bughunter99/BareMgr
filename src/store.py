@@ -42,6 +42,7 @@ class Store:
         sqlite_connections: list[dict[str, Any]] | None = None,
         object_sqlite_types: list[dict[str, Any]] | None = None,
         object_sqlite_done_dir: str | None = None,
+        write_lock_timeout: float = 30.0,
     ) -> None:
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
@@ -59,6 +60,7 @@ class Store:
         self._table_routes: dict[str, dict[str, Any]] = self._build_table_routes()
         self._object_type_ddls: dict[str, str] = self._build_object_type_ddls()
         self._ddl_applied: set[tuple[str, str]] = set()
+        self._write_lock_timeout = float(write_lock_timeout) if write_lock_timeout > 0 else 30.0
         self._closed = False
 
     def _normalize_scope(self, scope: str) -> str:
@@ -435,12 +437,14 @@ class Store:
         *,
         scope: str = "system",
         object_name: str | None = None,
+        timeout: float | None = None,
     ):
         """쓰기 커서를 제공한다.
 
         DB 파일 단위 RLock을 blocking으로 획득한다.
         같은 스레드에서 write_cursor 중첩 진입(또는 upsert_many 혼용)이 가능하다.
         블록 정상 종료 시 commit, 예외 발생 시 rollback 후 lock을 해제한다.
+        timeout: 락 대기 최대 시간(초). None이면 인스턴스 기본값(write_lock_timeout) 사용.
         """
         normalized_scope = self._normalize_scope(scope)
         if normalized_scope == "object" and not object_name:
@@ -448,7 +452,15 @@ class Store:
         key = self._get_db_key_for_table(
             table or "_", scope=normalized_scope, object_name=object_name
         )
-        with self._write_locks.get(key):
+        wait = timeout if timeout is not None else self._write_lock_timeout
+        lock = self._write_locks.get(key)
+        acquired = lock.acquire(timeout=wait)
+        if not acquired:
+            raise TimeoutError(
+                f"write_cursor timed out after {wait}s "
+                f"waiting for lock on {key!r}"
+            )
+        try:
             conn = self._get_write_conn_for_key(key)
             cur = conn.cursor()
             try:
@@ -459,6 +471,8 @@ class Store:
                 raise
             finally:
                 cur.close()
+        finally:
+            lock.release()
 
     def upsert_many(
         self,

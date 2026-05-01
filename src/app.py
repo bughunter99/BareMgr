@@ -74,6 +74,7 @@ class App:
             sqlite_connections=self._cfg.get("sqlite_connections", []),
             object_sqlite_types=self._cfg.get("object_sqlite_types", []),
             object_sqlite_done_dir=self._cfg.get("object_sqlite_done_dir"),
+            write_lock_timeout=float(self._cfg.get("write_lock_timeout", 30.0)),
         )
         self._store.initialize_registered_ddls()
 

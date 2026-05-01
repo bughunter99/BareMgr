@@ -404,3 +404,76 @@ def test_write_cursor_object_scope(tmp_path: Path) -> None:
         assert int(rows[0]["cnt"]) == 1
     finally:
         store.close()
+
+
+def test_write_cursor_timeout_raises(tmp_path: Path) -> None:
+    """write_cursor timeout 초과 시 TimeoutError가 발생해야 한다."""
+    store = Store(str(tmp_path / "app17"), write_lock_timeout=0.3)
+    lock_held = threading.Event()
+    allow_release = threading.Event()
+    try:
+        store.upsert_many("inventory", [{"id": "1", "name": "n1"}])
+
+        def hold_lock() -> None:
+            with store.write_cursor("inventory") as _cur:
+                lock_held.set()
+                allow_release.wait(timeout=3.0)
+
+        t = threading.Thread(target=hold_lock)
+        t.start()
+        lock_held.wait(timeout=1.0)
+
+        raised = False
+        try:
+            with store.write_cursor("inventory") as _cur:
+                pass
+        except TimeoutError:
+            raised = True
+
+        assert raised is True
+    finally:
+        allow_release.set()
+        store.close()
+
+
+def test_write_cursor_per_call_timeout_overrides_default(tmp_path: Path) -> None:
+    """write_cursor(timeout=...) 인수가 인스턴스 기본값보다 우선한다."""
+    # 기본값은 30s지만, 호출 시 0.2s를 지정하면 그걸로 대기한다
+    store = Store(str(tmp_path / "app17b"), write_lock_timeout=30.0)
+    lock_held = threading.Event()
+    allow_release = threading.Event()
+    try:
+        store.upsert_many("inventory", [{"id": "1", "name": "n1"}])
+
+        def hold_lock() -> None:
+            with store.write_cursor("inventory") as _cur:
+                lock_held.set()
+                allow_release.wait(timeout=5.0)
+
+        t = threading.Thread(target=hold_lock)
+        t.start()
+        lock_held.wait(timeout=1.0)
+
+        raised = False
+        started = time.perf_counter()
+        try:
+            with store.write_cursor("inventory", timeout=0.2) as _cur:
+                pass
+        except TimeoutError:
+            raised = True
+        elapsed = time.perf_counter() - started
+
+        assert raised is True
+        assert elapsed < 1.0  # 기본 30s 아닌 0.2s로 빠르게 실패해야 함
+    finally:
+        allow_release.set()
+        store.close()
+
+
+def test_write_cursor_timeout_config(tmp_path: Path) -> None:
+    """write_lock_timeout=0 이하 값은 기본값(30s)으로 대체된다."""
+    store = Store(str(tmp_path / "app18"), write_lock_timeout=0)
+    try:
+        assert store._write_lock_timeout == 30.0
+    finally:
+        store.close()

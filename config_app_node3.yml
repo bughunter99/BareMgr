@@ -82,6 +82,7 @@ object_sqlite_types:
     ddl_file: ddl/object_bbb.sql
 
 object_sqlite_done_dir: data/app3/objects/done
+write_lock_timeout: 30
 
 replication:
   port: 5560
