@@ -35,14 +35,14 @@ class SyncManager(ProcessingBase):
         target_alias = str(sync_cfg.get("target_db", "")).strip()
         self._source_db_alias = source_alias
         self._target_db_alias = target_alias
-        source_dsn = str(sync_cfg.get("source_dsn", "")).strip()
-        target_dsn = str(sync_cfg.get("target_dsn", "")).strip()
 
-        self._source_dsn = resolve_dsn(db_registry, source_alias, fallback=source_dsn) if source_alias else source_dsn
-        self._target_dsn = resolve_dsn(db_registry, target_alias, fallback=target_dsn) if target_alias else target_dsn
+        self._source_dsn = resolve_dsn(db_registry, source_alias) if source_alias else ""
+        self._target_dsn = resolve_dsn(db_registry, target_alias) if target_alias else ""
 
         self._conn_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_conn_manager = connection_manager is None
+        if self._owns_conn_manager:
+            self._conn_manager.set_db_registry(db_registry)
 
         super().__init__(job_name="sync", section_cfg=sync_cfg, logger=logger)
 
@@ -62,40 +62,28 @@ class SyncManager(ProcessingBase):
             return
 
         if not self._source_dsn or not self._target_dsn:
-            raise ValueError("sync requires source_dsn and target_dsn when dry_run=false")
+            raise ValueError("sync requires source_db and target_db aliases when dry_run=false")
 
         # Minimal sync example: ensure target table exists and copy all rows.
         self._copy_table_full(table)
 
     def _estimate_source_count(self, table: str) -> int:
-        if not self._source_dsn:
+        if not self._source_db_alias or not self._source_dsn:
             return 0
 
         with self._open_cursor(
             db_alias=self._source_db_alias,
-            dsn=self._source_dsn,
         ) as cur:
             cur.execute(f"SELECT COUNT(1) FROM {table}")
             row = cur.fetchone()
             return int(row[0]) if row else 0
 
     @contextmanager
-    def _open_cursor(self, *, db_alias: str, dsn: str):
-        if db_alias:
-            with self._conn_manager.cursor_by_alias(
-                db_alias,
-                fallback_dsn=dsn,
-            ) as cur:
-                yield cur
-            return
-
-        conn = self._conn_manager.get_connection(dsn, threaded=True)
-        cur = conn.cursor()
-        try:
-            validate_oracle_connection(conn)
+    def _open_cursor(self, *, db_alias: str):
+        if not db_alias:
+            raise ValueError("sync source_db alias is required")
+        with self._conn_manager.cursor_by_alias(db_alias) as cur:
             yield cur
-        finally:
-            cur.close()
 
     def _copy_table_full(self, table: str) -> None:
         cx_oracle = get_cx_oracle()

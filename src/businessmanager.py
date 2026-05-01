@@ -57,10 +57,9 @@ class BusinessManager(ProcessingBase):
 
     def _resolve_oracle_dsn(self, oracle_cfg: dict[str, Any]) -> str:
         alias = str(oracle_cfg.get("db", "") or oracle_cfg.get("source_db", "")).strip()
-        fallback_dsn = str(oracle_cfg.get("dsn", "") or oracle_cfg.get("source_dsn", "")).strip()
         if alias:
-            return resolve_dsn(self._db_registry, alias, fallback=fallback_dsn)
-        return fallback_dsn
+            return resolve_dsn(self._db_registry, alias)
+        return ""
 
     def _resolve_obj_id(self, row: dict[str, Any]) -> str:
         for key in ("obj_id", "id", "object_id", "pk"):
@@ -86,11 +85,16 @@ class BusinessManager(ProcessingBase):
         return out
 
     def _run_oracle_groups(self, *, source_table: str, row: dict[str, Any], processed_at: str) -> None:
-        if not self._oracle_dsn:
+        if not self._oracle_db_alias:
             return
         if self._connection_manager is None:
             if not self._warned_missing_conn_manager:
-                self._logger.warning("[BusinessManager] oracle dsn is configured but connection_manager is missing")
+                self._logger.warning("[BusinessManager] oracle db alias is configured but connection_manager is missing")
+                self._warned_missing_conn_manager = True
+            return
+        if not self._oracle_dsn:
+            if not self._warned_missing_conn_manager:
+                self._logger.warning("[BusinessManager] unresolved oracle db alias=%s", self._oracle_db_alias)
                 self._warned_missing_conn_manager = True
             return
 
@@ -124,17 +128,9 @@ class BusinessManager(ProcessingBase):
         if self._oracle_db_alias:
             with self._connection_manager.cursor_by_alias(
                 self._oracle_db_alias,
-                fallback_dsn=self._oracle_dsn,
             ) as cursor:
                 run_groups(cursor)
             return
-
-        conn = self._connection_manager.get_connection(self._oracle_dsn, threaded=True)
-        cursor = conn.cursor()
-        try:
-            run_groups(cursor)
-        finally:
-            cursor.close()
 
     def fetch_items(self, _ctx: dict[str, Any]) -> Iterable[dict[str, Any]]:
         if not self._input_tables:

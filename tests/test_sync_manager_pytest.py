@@ -11,8 +11,6 @@ def test_sync_manager_dry_run_no_oracle_connection(tmp_path: Path) -> None:
             "enabled": True,
             "dry_run": True,
             "mode": "incremental",
-            "source_dsn": "",
-            "target_dsn": "",
             "tables": ["INVENTORY"],
             "key_column": "ID",
             "timestamp_column": "UPDATED_AT",
@@ -74,12 +72,16 @@ def test_sync_validates_connection_before_table_sync(tmp_path: Path, monkeypatch
 
     cfg = {
         "sqlite": {"path": str(tmp_path / "app1")},
+        "oracle_connections": [
+            {"alias": "DB_MAIN", "tns": "source-dsn", "user": "u", "password": "p"},
+            {"alias": "DB_TARGET", "tns": "target-dsn", "user": "u", "password": "p"},
+        ],
         "syncmanager": {
             "enabled": True,
             "dry_run": False,
             "workers": 1,
-            "source_dsn": "source-dsn",
-            "target_dsn": "target-dsn",
+            "source_db": "DB_MAIN",
+            "target_db": "DB_TARGET",
             "tables": ["INVENTORY"],
             "checkpoint_db": str(tmp_path / "sync_checkpoint.db"),
         },

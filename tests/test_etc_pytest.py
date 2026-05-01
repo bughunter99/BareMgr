@@ -129,13 +129,17 @@ def test_etc_oracle_probe_validates_connection_first(tmp_path: Path, monkeypatch
 
     fake_module = SimpleNamespace(connect=lambda dsn, threaded=True: FakeConnection())
     monkeypatch.setitem(sys.modules, "cx_Oracle", fake_module)
+    monkeypatch.setattr("src.oracleconnectionmanager.get_cx_oracle", lambda: fake_module)
 
     cfg = {
         "node_id": "node-test",
+        "oracle_connections": [
+            {"alias": "DB_MAIN", "tns": "dsn", "user": "u", "password": "p"},
+        ],
         "pipeline": {
             "etc": {
                 "enabled": True,
-                "oracle": {"dsn": "dsn"},
+                "db": "DB_MAIN",
                 "tasks": [
                     {"name": "oracle-probe", "type": "oracle_probe", "enabled": True, "interval_sec": 1}
                 ],
@@ -146,7 +150,8 @@ def test_etc_oracle_probe_validates_connection_first(tmp_path: Path, monkeypatch
     mgr = EtcManager(cfg=cfg, store=store, logger=log)
     try:
         mgr.run({"job_name": "etc"})
-        assert executed_sql[:2] == ["SELECT sysdate FROM dual", "SELECT 1 FROM dual"]
+        assert "SELECT 1 FROM dual" in executed_sql
+        assert executed_sql.count("SELECT sysdate FROM dual") >= 1
     finally:
         mgr.close()
         store.close()

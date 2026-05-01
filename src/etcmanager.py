@@ -75,14 +75,14 @@ class EtcManager:
         self._etc_lock = threading.Lock()
 
         db_registry = build_registry(cfg)
-        # db: alias 우선, 없으면 oracle.dsn, 없으면 collectors.oracle.dsn fallback
+        # db alias로만 Oracle 연결을 해석한다.
         db_alias = str(etc_cfg.get("db", "")).strip()
         oracle_cfg = etc_cfg.get("oracle", {}) or {}
-        collector_oracle_dsn = cfg.get("collectors", {}).get("oracle", {}).get("dsn", "")
-        fallback_dsn = str(oracle_cfg.get("dsn") or collector_oracle_dsn).strip()
-        self._oracle_dsn = resolve_dsn(db_registry, db_alias, fallback=fallback_dsn)
+        self._oracle_dsn = resolve_dsn(db_registry, db_alias) if db_alias else ""
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_connection_manager = connection_manager is None
+        if self._owns_connection_manager:
+            self._connection_manager.set_db_registry(db_registry)
         # pool config: alias 우선, 없으면 oracle.oracle_pool fallback
         pool_from_alias = resolve_pool_cfg(db_registry, db_alias)
         legacy_pool = oracle_cfg.get("oracle_pool", {}) or {}
@@ -189,7 +189,7 @@ class EtcManager:
             conn.close()
 
     def _task_oracle_probe(self, name: str, task: dict[str, Any]) -> int:
-        dsn = str(task.get("dsn") or self._oracle_dsn).strip()
+        dsn = str(self._oracle_dsn).strip()
         if not dsn and not self._pool_enabled:
             self._logger.warning("[Etc] task=%s oracle_probe skipped (dsn missing)", name)
             return 0

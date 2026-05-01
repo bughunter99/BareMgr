@@ -59,8 +59,19 @@ class App:
         )
         init_oracle_client_from_config(self._cfg, logger=self._logger)
         self._db_registry = build_registry(self._cfg)
+        oracle_cfg = self._cfg.get("oracle", {}) or {}
+        collector_oracle_cfg = self._cfg.get("collectors", {}).get("oracle", {}) or {}
+        configured_timeout = oracle_cfg.get(
+            "cursor_acquire_timeout_sec",
+            collector_oracle_cfg.get("cursor_acquire_timeout_sec", 30.0),
+        )
+        try:
+            manager_timeout = float(configured_timeout)
+        except Exception:
+            manager_timeout = 30.0
         self._oracle_connection_manager = OracleConnectionManager(
             self._logger,
+            cursor_acquire_timeout_sec=manager_timeout,
             db_registry=self._db_registry,
         )
 

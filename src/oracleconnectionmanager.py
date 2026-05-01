@@ -31,6 +31,31 @@ class OracleConnectionManager:
     def set_db_registry(self, db_registry: dict[str, dict] | None) -> None:
         self._db_registry = dict(db_registry or {})
 
+    def _coerce_timeout(self, value: Any, default: float) -> float:
+        try:
+            timeout_value = float(value)
+        except Exception:
+            return default
+        return timeout_value if timeout_value > 0 else default
+
+    def _resolve_cursor_acquire_timeout(self, alias: str, timeout: float | None) -> float:
+        if timeout is not None:
+            return self._coerce_timeout(timeout, self._cursor_acquire_timeout_sec)
+
+        entry = self._db_registry.get(alias, {}) or {}
+        if isinstance(entry, dict):
+            per_alias_timeout = entry.get("cursor_acquire_timeout_sec", None)
+            if per_alias_timeout is not None:
+                return self._coerce_timeout(per_alias_timeout, self._cursor_acquire_timeout_sec)
+
+            pool_cfg = entry.get("pool", {}) or {}
+            if isinstance(pool_cfg, dict):
+                pool_timeout = pool_cfg.get("cursor_acquire_timeout_sec", None)
+                if pool_timeout is not None:
+                    return self._coerce_timeout(pool_timeout, self._cursor_acquire_timeout_sec)
+
+        return self._cursor_acquire_timeout_sec
+
     def get_connection(self, dsn: str, *, threaded: bool = True) -> Any:
         normalized_dsn = str(dsn).strip()
         if not normalized_dsn:
@@ -161,8 +186,6 @@ class OracleConnectionManager:
         self,
         db_alias: str,
         timeout: float | None = None,
-        *,
-        fallback_dsn: str = "",
     ):
         """db alias 기준으로 cursor를 열고 자동 정리한다.
 
@@ -173,9 +196,7 @@ class OracleConnectionManager:
         if not alias:
             raise ValueError("db alias is required")
 
-        wait = self._cursor_acquire_timeout_sec if timeout is None else float(timeout)
-        if wait <= 0:
-            wait = self._cursor_acquire_timeout_sec
+        wait = self._resolve_cursor_acquire_timeout(alias, timeout)
 
         pool_cfg = resolve_pool_cfg(self._db_registry, alias)
         pool_enabled = bool(pool_cfg.get("enabled", False))
@@ -201,7 +222,7 @@ class OracleConnectionManager:
                             ) from e
                         time.sleep(0.05)
             else:
-                dsn = resolve_dsn(self._db_registry, alias, fallback=fallback_dsn)
+                dsn = resolve_dsn(self._db_registry, alias)
                 if not str(dsn).strip():
                     raise ValueError(
                         f"oracle dsn is required alias={alias}"

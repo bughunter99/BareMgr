@@ -46,19 +46,19 @@ def build_registry(cfg: dict[str, Any]) -> dict[str, dict]:
     }
 
 
-def resolve_dsn(registry: dict[str, dict], alias: str, fallback: str = "") -> str:
-    """alias → 'user/password@tns' DSN 문자열 반환. 없으면 fallback."""
+def resolve_dsn(registry: dict[str, dict], alias: str) -> str:
+    """alias → 'user/password@tns' DSN 문자열 반환. 없으면 빈 문자열."""
     if not alias:
-        return fallback
+        return ""
     entry = registry.get(str(alias).strip())
     if not entry:
-        return fallback
+        return ""
     user = str(entry.get("user", "")).strip()
     password = str(entry.get("password", "")).strip()
     tns = str(entry.get("tns", "")).strip()
     if user and password and tns:
         return f"{user}/{password}@{tns}"
-    return tns or fallback
+    return tns
 
 
 def resolve_pool_cfg(registry: dict[str, dict], alias: str) -> dict[str, Any]:

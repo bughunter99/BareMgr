@@ -430,12 +430,13 @@ def test_oracle_collector_cursor_acquire_timeout(tmp_path, monkeypatch) -> None:
                 "user": "u1",
                 "password": "p1",
                 "tns": "main:1521/ORCL",
+                "cursor_acquire_timeout_sec": 0.1,
                 "pool": {"enabled": True, "min": 1, "max": 1, "increment": 1, "threaded": True, "getmode": "wait"},
             }
         },
     )
     collector = OracleCollector(
-        cfg={"db": "DB_MAIN", "cursor_acquire_timeout_sec": 0.1},
+        cfg={"db": "DB_MAIN"},
         store=store,
         logger=log,
         connection_manager=manager,

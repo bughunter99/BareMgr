@@ -41,6 +41,9 @@ oracle_client:
   config_dir: ""
   driver_name: BareMgr
 
+oracle:
+  cursor_acquire_timeout_sec: 30
+
 oracle_connections:
   - alias: DB_MAIN
     tns: 192.168.1.100:1521/ORCL
@@ -190,7 +193,6 @@ collectors:
     enabled: true
     db: DB_MAIN
     interval_sec: 60
-    cursor_acquire_timeout_sec: 30
     test:
       enabled: true
       emit_once: false

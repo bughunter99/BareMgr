@@ -16,11 +16,10 @@ class FailoverNodeDb(FailoverNode):
         super().__init__(config_file=config_file, logger=logger)
         failover_cfg = self.config.get("failover", {})
         db_cfg = failover_cfg.get("db", {})
-        oracle_cfg = self.config.get("collectors", {}).get("oracle", {})
 
-        self._dsn = db_cfg.get("dsn") or oracle_cfg.get("dsn")
+        self._dsn = db_cfg.get("dsn")
         if not self._dsn:
-            raise ValueError("failover.db.dsn or collectors.oracle.dsn is required for DB failover")
+            raise ValueError("failover.db.dsn is required for DB failover")
 
         self._table = self._normalize_table_name(db_cfg.get("table", "FAILOVER_NODES"))
         columns_cfg = db_cfg.get("columns", {})
