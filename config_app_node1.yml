@@ -94,7 +94,7 @@ replication:
     - 127.0.0.1:5560
 
 pipeline:
-  processing:
+  business:
     enabled: true
     interval_sec: 300
     run_on_active_only: true
@@ -164,7 +164,7 @@ drone:
   auth_token: ""
   headers: {}
 
-sync:
+syncmanager:
   enabled: false
   interval_sec: 600
   run_on_active_only: true

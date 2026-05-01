@@ -31,7 +31,7 @@ class BusinessManager(ProcessingBase):
         self._store = store
         self._connection_manager = connection_manager
 
-        section = (cfg.get("pipeline", {}).get("business", {}) or cfg.get("pipeline", {}).get("processing", {}))
+        section = cfg.get("pipeline", {}).get("business", {})
         self._section = section
         self._input_tables = [str(t) for t in (section.get("input_tables", []) or [])]
         self._input_limit = max(1, int(section.get("input_limit_per_table", 200)))

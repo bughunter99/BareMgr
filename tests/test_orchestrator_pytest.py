@@ -17,15 +17,15 @@ def test_orchestrator_processing_runs_only_when_active(tmp_path: Path) -> None:
 
     cfg = {
         "pipeline": {
-            "processing": {
+            "business": {
                 "enabled": True,
                 "interval_sec": 1,
                 "run_on_active_only": True,
             },
-            "sync": {
-                "enabled": False,
-            },
-        }
+        },
+        "syncmanager": {
+            "enabled": False,
+        },
     }
 
     orch = AppOrchestrator(cfg=cfg, logger=log, processing_callback=on_processing, sync_callback=on_sync)
@@ -54,15 +54,15 @@ def test_orchestrator_runs_immediately_on_active_transition(tmp_path: Path) -> N
 
     cfg = {
         "pipeline": {
-            "processing": {
+            "business": {
                 "enabled": True,
                 "interval_sec": 30,
                 "run_on_active_only": True,
             },
-            "sync": {
-                "enabled": False,
-            },
-        }
+        },
+        "syncmanager": {
+            "enabled": False,
+        },
     }
 
     orch = AppOrchestrator(cfg=cfg, logger=log, processing_callback=on_processing, sync_callback=on_sync)

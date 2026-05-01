@@ -24,7 +24,7 @@ class SyncManager(ProcessingBase):
         connection_manager: OracleConnectionManager | None = None,
         **_: Any,
     ) -> None:
-        sync_cfg = cfg.get("sync", {}) or cfg.get("pipeline", {}).get("sync", {})
+        sync_cfg = cfg.get("syncmanager", {}) or cfg.get("pipeline", {}).get("syncmanager", {})
         self._tables = [str(t).strip().upper() for t in (sync_cfg.get("tables", []) or []) if str(t).strip()]
         self._dry_run = bool(sync_cfg.get("dry_run", True))
 
