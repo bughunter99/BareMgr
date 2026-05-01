@@ -15,7 +15,10 @@ import sqlite3
 import threading
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .appconfig import AppConfig
 
 
 class _WriteLockPool:
@@ -38,6 +41,7 @@ class Store:
         base_dir: str,
         *,
         logger=None,
+        app_config: "AppConfig | None" = None,
         replication_cfg: dict[str, Any] | None = None,
         sqlite_connections: list[dict[str, Any]] | None = None,
         object_sqlite_types: list[dict[str, Any]] | None = None,
@@ -54,6 +58,7 @@ class Store:
         self._write_conns: dict[str, sqlite3.Connection] = {}
         self._write_locks = _WriteLockPool()
         self._logger = logger
+        self._app_config = app_config
         self._replication_cfg = replication_cfg or {}
         self._sqlite_connections = sqlite_connections or []
         self._object_sqlite_types = object_sqlite_types or []

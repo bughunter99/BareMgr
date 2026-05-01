@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from .queryaaa import QueryAAA
 from .querybbb import QueryBBB
@@ -15,6 +15,9 @@ from .oracleconnectionmanager import OracleConnectionManager
 from .processing import ProcessingBase
 from .store import Store
 
+if TYPE_CHECKING:
+    from .appconfig import AppConfig
+
 
 class BusinessManager(ProcessingBase):
     """Business worker: query object list, then fan-out object-level processing."""
@@ -25,8 +28,10 @@ class BusinessManager(ProcessingBase):
         store: Store,
         logger: Logger,
         connection_manager: OracleConnectionManager | None = None,
+        app_config: "AppConfig | None" = None,
         **_: Any,
     ) -> None:
+        self._app_config = app_config
         self._root_cfg = cfg
         self._store = store
         self._connection_manager = connection_manager
@@ -36,7 +41,7 @@ class BusinessManager(ProcessingBase):
         self._input_tables = [str(t) for t in (section.get("input_tables", []) or [])]
         self._input_limit = max(1, int(section.get("input_limit_per_table", 200)))
         self._output_table = str(section.get("output_table", "pipeline_business_results"))
-        self._db_registry = build_registry(cfg)
+        self._db_registry = app_config.db_registry if app_config is not None else build_registry(cfg)
         self._oracle_cfg = section.get("oracle", {}) or {}
         self._oracle_db_alias = str(self._oracle_cfg.get("db", "") or self._oracle_cfg.get("source_db", "")).strip()
         self._oracle_dsn = self._resolve_oracle_dsn(self._oracle_cfg)

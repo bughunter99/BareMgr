@@ -27,9 +27,8 @@ import time
 import re
 from typing import Any
 
+from .appconfig import AppConfig
 from .basecollector import BaseCollector
-from .config_loader import load_config
-from .db_registry import build_registry
 from .etcmanager import EtcManager
 from .failovernode import FailoverNode
 from .failovernodedb import FailoverNodeDb
@@ -48,8 +47,9 @@ from .syncmanager import SyncManager
 
 class App:
     def __init__(self, config_file: str) -> None:
-        self._cfg: dict[str, Any] = load_config(config_file)
-        logging_cfg = self._cfg.get("logging", {})
+        self._app_config = AppConfig.from_file(config_file)
+        self._cfg: dict[str, Any] = self._app_config.raw
+        logging_cfg = self._app_config.logging_cfg
 
         # ── 로거 ─────────────────────────────────────────────────────
         self._logger = Logger(
@@ -58,8 +58,8 @@ class App:
             traceback=bool(logging_cfg.get("traceback", False)),
         )
         init_oracle_client_from_config(self._cfg, logger=self._logger)
-        self._db_registry = build_registry(self._cfg)
-        oracle_cfg = self._cfg.get("oracle", {}) or {}
+        self._db_registry = self._app_config.db_registry
+        oracle_cfg = self._app_config.oracle_cfg
         collector_oracle_cfg = self._cfg.get("collectors", {}).get("oracle", {}) or {}
         configured_timeout = oracle_cfg.get(
             "cursor_acquire_timeout_sec",
@@ -85,6 +85,7 @@ class App:
         self._store = Store(
             sqlite_base_dir,
             logger=self._logger,
+            app_config=self._app_config,
             replication_cfg=self._cfg.get("replication", {}),
             sqlite_connections=self._cfg.get("sqlite_connections", []),
             object_sqlite_types=self._cfg.get("object_sqlite_types", []),
@@ -101,12 +102,14 @@ class App:
         )
         self._business_manager = BusinessManager(
             cfg=self._cfg,
+            app_config=self._app_config,
             store=self._store,
             logger=self._logger,
             connection_manager=self._oracle_connection_manager,
         )
         self._sync_manager = SyncManager(
             cfg=self._cfg,
+            app_config=self._app_config,
             logger=self._logger,
             connection_manager=self._oracle_connection_manager,
         )
@@ -149,6 +152,7 @@ class App:
             collectors.append(
                 OracleCollector(
                     cfg=col_cfg["oracle"],
+                    app_config=self._app_config,
                     store=self._store,
                     logger=self._logger,
                     on_collect=self._on_collect,

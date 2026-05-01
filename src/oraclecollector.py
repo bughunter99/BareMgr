@@ -19,6 +19,7 @@ from .oracleconnectionmanager import OracleConnectionManager
 from .oraclejobs import ORACLE_JOBS, OracleJob
 
 if TYPE_CHECKING:
+    from .appconfig import AppConfig
     from .store import Store
     from .logger import Logger
 
@@ -31,6 +32,7 @@ class OracleCollector(BaseCollector):
         logger: "Logger",
         on_collect=None,
         connection_manager: OracleConnectionManager | None = None,
+        app_config: "AppConfig | None" = None,
     ) -> None:
         super().__init__(
             name="oracle",
@@ -51,7 +53,14 @@ class OracleCollector(BaseCollector):
         self._last_ts: dict[str, str] = {
             job.name: "1970-01-01 00:00:00" for job in self._jobs
         }
-        self._connection_manager = connection_manager or OracleConnectionManager(logger)
+        self._app_config = app_config
+        if connection_manager is None and app_config is not None:
+            self._connection_manager = OracleConnectionManager(
+                logger,
+                db_registry=app_config.db_registry,
+            )
+        else:
+            self._connection_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_connection_manager = connection_manager is None
         # alias 기반 연결만 허용한다.
 

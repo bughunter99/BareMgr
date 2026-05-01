@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import threading
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from .db_registry import build_registry, resolve_dsn
 from .logger import Logger
@@ -13,6 +13,9 @@ from .oracleconnectionmanager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
 from .oracle_utils import validate_oracle_connection
 from .processing import ProcessingBase
+
+if TYPE_CHECKING:
+    from .appconfig import AppConfig
 
 
 class SyncManager(ProcessingBase):
@@ -23,13 +26,15 @@ class SyncManager(ProcessingBase):
         cfg: dict[str, Any],
         logger: Logger,
         connection_manager: OracleConnectionManager | None = None,
+        app_config: "AppConfig | None" = None,
         **_: Any,
     ) -> None:
+        self._app_config = app_config
         sync_cfg = cfg.get("syncmanager", {}) or cfg.get("pipeline", {}).get("syncmanager", {})
         self._tables = [str(t).strip().upper() for t in (sync_cfg.get("tables", []) or []) if str(t).strip()]
         self._dry_run = bool(sync_cfg.get("dry_run", True))
 
-        db_registry = build_registry(cfg)
+        db_registry = app_config.db_registry if app_config is not None else build_registry(cfg)
         self._db_registry = db_registry
         source_alias = str(sync_cfg.get("source_db", "")).strip()
         target_alias = str(sync_cfg.get("target_db", "")).strip()
