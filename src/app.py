@@ -72,6 +72,8 @@ class App:
             logger=self._logger,
             replication_cfg=self._cfg.get("replication", {}),
             sqlite_connections=self._cfg.get("sqlite_connections", []),
+            object_sqlite_types=self._cfg.get("object_sqlite_types", []),
+            object_sqlite_done_dir=self._cfg.get("object_sqlite_done_dir"),
         )
         self._store.initialize_registered_ddls()
 

@@ -12,6 +12,7 @@ store.py — Thread-safe SQLite 저장소.
 
 import json
 import re
+import shutil
 import sqlite3
 import threading
 from contextlib import ExitStack
@@ -41,19 +42,44 @@ class Store:
         logger=None,
         replication_cfg: dict[str, Any] | None = None,
         sqlite_connections: list[dict[str, Any]] | None = None,
+        object_sqlite_types: list[dict[str, Any]] | None = None,
+        object_sqlite_done_dir: str | None = None,
     ) -> None:
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
+        self._object_done_dir = (
+            Path(object_sqlite_done_dir) if object_sqlite_done_dir
+            else self._base_dir / "objects" / "done"
+        )
         self._meta_lock = threading.Lock()
         self._write_conns: dict[str, sqlite3.Connection] = {}
         self._write_locks = _WriteLockPool()
         self._logger = logger
         self._replication_cfg = replication_cfg or {}
         self._sqlite_connections = sqlite_connections or []
-        self._sqlite_targets: dict[str, str] = self._build_sqlite_targets()
+        self._object_sqlite_types = object_sqlite_types or []
         self._table_routes: dict[str, dict[str, Any]] = self._build_table_routes()
+        self._object_type_ddls: dict[str, str] = self._build_object_type_ddls()
         self._ddl_applied: set[tuple[str, str]] = set()
         self._closed = False
+
+    def _normalize_scope(self, scope: str) -> str:
+        normalized = str(scope or "system").strip().lower()
+        if normalized not in ("system", "object"):
+            raise ValueError(f"invalid scope: {scope}")
+        return normalized
+
+    def _normalize_object_name(self, object_name: str) -> str:
+        normalized = re.sub(r"[^A-Za-z0-9_-]", "_", str(object_name)).strip("_")
+        if not normalized:
+            raise ValueError(f"invalid object_name: {object_name}")
+        return normalized
+
+    def _normalize_object_type(self, object_type: str) -> str:
+        normalized = re.sub(r"[^A-Za-z0-9_-]", "_", str(object_type)).strip("_")
+        if not normalized:
+            raise ValueError(f"invalid object_type: {object_type}")
+        return normalized.upper()
 
     def _normalize_table(self, table: str) -> str:
         normalized = re.sub(r"[^A-Za-z0-9_]", "_", table).strip("_")
@@ -61,30 +87,43 @@ class Store:
             raise ValueError(f"invalid table name: {table}")
         return normalized.lower()
 
-    def _build_sqlite_targets(self) -> dict[str, str]:
-        targets: dict[str, str] = {}
+    def _resolve_route_db_path(
+        self,
+        *,
+        path_value: str,
+        sqlite_target: str,
+        sqlite_targets: dict[str, str],
+    ) -> str:
+        if path_value:
+            p = Path(path_value)
+        elif sqlite_target:
+            target_path = sqlite_targets.get(sqlite_target, sqlite_target)
+            p = Path(target_path)
+        else:
+            return ""
 
-        # New top-level section (preferred): sqlite_connections
-        for entry in self._sqlite_connections:
-            if not isinstance(entry, dict):
-                continue
-            # table route와 별도로 sqlite 이름을 쓸 수 있게 optional 지원
-            name = str(entry.get("name", "")).strip()
-            path = str(entry.get("path", "")).strip()
-            if name and path:
-                targets[name] = path
-
-        # Legacy fallback under replication
-        for name, target in (self._replication_cfg.get("sqlite_targets", {}) or {}).items():
-            if isinstance(target, dict):
-                path = str(target.get("path", "")).strip()
-                if path:
-                    targets.setdefault(str(name).strip(), path)
-
-        return targets
+        if not p.is_absolute():
+            p = Path.cwd() / p
+        return str(p)
 
     def _build_table_routes(self) -> dict[str, dict[str, Any]]:
         routes: dict[str, dict[str, Any]] = {}
+        sqlite_targets: dict[str, str] = {}
+
+        for entry in self._sqlite_connections:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name", "")).strip()
+            path = str(entry.get("path", "")).strip()
+            if name and path:
+                sqlite_targets[name] = path
+
+        for name, target in (self._replication_cfg.get("sqlite_targets", {}) or {}).items():
+            if not isinstance(target, dict):
+                continue
+            path = str(target.get("path", "")).strip()
+            if path:
+                sqlite_targets.setdefault(str(name).strip(), path)
 
         # New top-level section (preferred): sqlite_connections
         for entry in self._sqlite_connections:
@@ -93,12 +132,15 @@ class Store:
             table = str(entry.get("table", "")).strip()
             if not table:
                 continue
-            sqlite_target = str(entry.get("sqlite", "")).strip()
             path_value = str(entry.get("path", "")).strip()
+            sqlite_target = str(entry.get("sqlite", "")).strip()
+            resolved_db_path = self._resolve_route_db_path(
+                path_value=path_value,
+                sqlite_target=sqlite_target,
+                sqlite_targets=sqlite_targets,
+            )
             routes[self._normalize_table(table)] = {
-                "name": str(entry.get("name", "")).strip(),
-                "sqlite": sqlite_target,
-                "path": path_value,
+                "db_path": resolved_db_path,
                 "ddl_file": str(entry.get("ddl_file", "")).strip(),
             }
 
@@ -107,35 +149,52 @@ class Store:
             if not isinstance(route, dict):
                 continue
             key = self._normalize_table(str(table))
+            path_value = str(route.get("path", "")).strip()
+            sqlite_target = str(route.get("sqlite", "")).strip()
+            resolved_db_path = self._resolve_route_db_path(
+                path_value=path_value,
+                sqlite_target=sqlite_target,
+                sqlite_targets=sqlite_targets,
+            )
             routes.setdefault(
                 key,
                 {
-                    "name": "",
-                    "sqlite": str(route.get("sqlite", "")).strip(),
+                    "db_path": resolved_db_path,
                     "ddl_file": str(route.get("ddl_file", "")).strip(),
                 },
             )
 
         return routes
 
-    def _resolve_db_path(self, table: str) -> Path:
-        key = self._normalize_table(table)
-        route = self._table_routes.get(key, {})
-        route_path = str(route.get("path", "")).strip()
-        sqlite_target = str(route.get("sqlite", "")).strip()
+    def _build_object_type_ddls(self) -> dict[str, str]:
+        mapping: dict[str, str] = {}
+        for entry in self._object_sqlite_types:
+            if not isinstance(entry, dict):
+                continue
+            object_type = str(entry.get("type", "")).strip()
+            ddl_file = str(entry.get("ddl_file", "")).strip()
+            if not object_type or not ddl_file:
+                continue
+            key = self._normalize_object_type(object_type)
+            mapping[key] = ddl_file
+        return mapping
 
-        if route_path:
-            path_obj = Path(route_path)
-            if not path_obj.is_absolute():
-                path_obj = Path.cwd() / path_obj
+    def _resolve_db_path(self, table: str, *, scope: str = "system", object_name: str | None = None) -> Path:
+        normalized_scope = self._normalize_scope(scope)
+        if normalized_scope == "object":
+            if not object_name:
+                raise ValueError("object_name is required when scope='object'")
+            obj = self._normalize_object_name(object_name)
+            path_obj = self._base_dir / "objects" / f"{obj}.db"
             path_obj.parent.mkdir(parents=True, exist_ok=True)
             return path_obj
 
-        if sqlite_target:
-            target_path = self._sqlite_targets.get(sqlite_target, sqlite_target)
-            path_obj = Path(target_path)
-            if not path_obj.is_absolute():
-                path_obj = Path.cwd() / path_obj
+        key = self._normalize_table(table)
+        route = self._table_routes.get(key, {})
+        route_path = str(route.get("db_path", "")).strip()
+
+        if route_path:
+            path_obj = Path(route_path)
             path_obj.parent.mkdir(parents=True, exist_ok=True)
             return path_obj
 
@@ -149,9 +208,12 @@ class Store:
             conn.execute("PRAGMA query_only=ON")
         return conn
 
-    def _get_db_key_for_table(self, table: str) -> str:
-        db_path = self._resolve_db_path(table)
+    def _get_db_key_for_table(self, table: str, *, scope: str = "system", object_name: str | None = None) -> str:
+        db_path = self._resolve_db_path(table, scope=scope, object_name=object_name)
         return str(db_path.resolve())
+
+    def _get_db_key_for_object(self, object_name: str) -> str:
+        return self._get_db_key_for_table("_", scope="object", object_name=object_name)
 
     def _get_write_conn_for_key(self, key: str) -> sqlite3.Connection:
         with self._meta_lock:
@@ -165,8 +227,14 @@ class Store:
             self._write_conns[key] = conn
             return conn
 
-    def _get_write_conn_for_table(self, table: str) -> tuple[sqlite3.Connection, str]:
-        key = self._get_db_key_for_table(table)
+    def _get_write_conn_for_table(
+        self,
+        table: str,
+        *,
+        scope: str = "system",
+        object_name: str | None = None,
+    ) -> tuple[sqlite3.Connection, str]:
+        key = self._get_db_key_for_table(table, scope=scope, object_name=object_name)
         return self._get_write_conn_for_key(key), key
 
     def _open_read_conn_for_key(self, key: str) -> sqlite3.Connection:
@@ -245,6 +313,87 @@ class Store:
                         ddl_file,
                     )
 
+    def initialize_object_sqlite(self, object_name: str, object_type: str) -> Path:
+        """객체별 SQLite 파일을 생성하고 object_type에 매핑된 DDL을 적용한다."""
+        normalized_type = self._normalize_object_type(object_type)
+        ddl_file = self._object_type_ddls.get(normalized_type, "").strip()
+        if not ddl_file:
+            raise ValueError(f"object type is not registered: {normalized_type}")
+
+        conn_key = self._get_db_key_for_object(object_name)
+        conn = self._get_write_conn_for_key(conn_key)
+
+        apply_key = (conn_key, f"__object_type__:{normalized_type}")
+        with self._write_locks.get(conn_key):
+            if apply_key in self._ddl_applied:
+                return Path(conn_key)
+
+            ddl_path = self._resolve_ddl_path(ddl_file)
+            if not ddl_path.exists():
+                raise FileNotFoundError(
+                    f"Object DDL file not found type={normalized_type}: {ddl_path}"
+                )
+
+            cur = conn.cursor()
+            try:
+                script = ddl_path.read_text(encoding="utf-8")
+                cur.executescript(script)
+                conn.commit()
+                self._ddl_applied.add(apply_key)
+            finally:
+                cur.close()
+
+        return Path(conn_key)
+
+    def finalize_object_sqlite(self, object_name: str, *, dest_dir: str | None = None) -> Path:
+        """객체 처리 완료 후 SQLite 파일을 완료 디렉토리로 이동한다.
+
+        WAL 체크포인트 → 연결 종료 → 파일 이동 순서로 안전하게 처리한다.
+        이동된 파일 경로를 반환한다.
+        """
+        conn_key = self._get_db_key_for_object(object_name)
+        db_path = Path(conn_key)
+
+        if not db_path.exists():
+            raise FileNotFoundError(
+                f"Object SQLite not found object_name={object_name}: {db_path}"
+            )
+
+        done_dir = Path(dest_dir) if dest_dir else self._object_done_dir
+        done_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = done_dir / db_path.name
+
+        lock = self._write_locks.get(conn_key)
+        with lock:
+            # WAL 체크포인트: 모든 변경 내용을 메인 파일에 반영
+            with self._meta_lock:
+                conn = self._write_conns.pop(conn_key, None)
+            if conn is not None:
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(FULL)")
+                    conn.commit()
+                finally:
+                    conn.close()
+
+            # .db, .db-wal, .db-shm 파일 이동
+            for suffix in ("", "-wal", "-shm"):
+                src = db_path.parent / (db_path.name + suffix)
+                if src.exists():
+                    shutil.move(str(src), str(done_dir / src.name))
+
+        # 이 객체 관련 ddl_applied 항목 제거
+        with self._meta_lock:
+            self._ddl_applied = {
+                k for k in self._ddl_applied if k[0] != conn_key
+            }
+
+        if self._logger is not None:
+            self._logger.info(
+                "[Store] finalized object_name=%s -> %s", object_name, dest_path
+            )
+
+        return dest_path
+
     def _apply_route_ddl_if_needed(
         self,
         cursor: sqlite3.Cursor,
@@ -307,11 +456,23 @@ class Store:
         )
 
     # ── 공개 API ─────────────────────────────────────────────────────
-    def upsert_many(self, table: str, rows: list[dict[str, Any]]) -> int:
+    def upsert_many(
+        self,
+        table: str,
+        rows: list[dict[str, Any]],
+        *,
+        scope: str = "system",
+        object_name: str | None = None,
+    ) -> int:
         """rows를 table에 일괄 삽입/갱신. 삽입된 행 수 반환."""
         if not rows:
             return 0
-        conn, conn_key = self._get_write_conn_for_table(table)
+        normalized_scope = self._normalize_scope(scope)
+        conn, conn_key = self._get_write_conn_for_table(
+            table,
+            scope=normalized_scope,
+            object_name=object_name,
+        )
         with self._write_locks.get(conn_key):
             cur = conn.cursor()
             try:
@@ -339,14 +500,32 @@ class Store:
             payload.update(metadata)
         return json.dumps(payload, ensure_ascii=False, default=str).encode()
 
-    def query(self, sql: str, params: tuple = (), table: str | None = None) -> list[dict]:
-        if table is None:
+    def query(
+        self,
+        sql: str,
+        params: tuple = (),
+        table: str | None = None,
+        *,
+        scope: str = "system",
+        object_name: str | None = None,
+    ) -> list[dict]:
+        normalized_scope = self._normalize_scope(scope)
+        if normalized_scope == "object":
+            if not object_name:
+                raise ValueError("object_name is required when scope='object'")
+            resolved_table = table or "_"
+            conn_key = self._get_db_key_for_table(
+                resolved_table,
+                scope="object",
+                object_name=object_name,
+            )
+        elif table is None:
             with self._meta_lock:
                 if len(self._write_conns) != 1:
                     raise ValueError("table is required when multiple table DB files exist")
                 conn_key = next(iter(self._write_conns))
         else:
-            conn_key = self._get_db_key_for_table(table)
+            conn_key = self._get_db_key_for_table(table, scope="system")
 
         conn = self._open_read_conn_for_key(conn_key)
         try:

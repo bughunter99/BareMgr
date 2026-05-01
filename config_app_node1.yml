@@ -65,18 +65,23 @@ oracle_connections:
       getmode: wait
 
 sqlite_connections:
-  - name: MAP_JOB1_RESULTS
-    table: job1_results
+  - table: job1_results
     path: data/app1/replication/default.db
     ddl_file: ddl/table1.sql
-  - name: MAP_JOB2_RESULTS
-    table: job2_results
+  - table: job2_results
     path: data/app1/replication/analytics.db
     ddl_file: ddl/table2.sql
-  - name: MAP_SPLUNK_JOB1
-    table: splunk_job1
+  - table: splunk_job1
     path: data/app1/replication/analytics.db
     ddl_file: ddl/table3.sql
+
+object_sqlite_types:
+  - type: AAA
+    ddl_file: ddl/object_aaa.sql
+  - type: BBB
+    ddl_file: ddl/object_bbb.sql
+
+object_sqlite_done_dir: data/app1/objects/done
 
 replication:
   port: 5556
