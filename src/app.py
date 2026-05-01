@@ -72,10 +72,7 @@ class App:
             logger=self._logger,
             sqlite_cfg=self._cfg.get("sqlite", {}),
             replication_cfg=self._cfg.get("replication", {}),
-            sqlite_connections=(
-                self._cfg.get("sqlite_connections", [])
-                or self._cfg.get("sql_connections", [])
-            ),
+            sqlite_connections=self._cfg.get("sqlite_connections", []),
         )
         self._store.initialize_registered_ddls()
 

@@ -27,7 +27,6 @@ class Store:
         sqlite_cfg: dict[str, Any] | None = None,
         replication_cfg: dict[str, Any] | None = None,
         sqlite_connections: list[dict[str, Any]] | None = None,
-        sql_connections: list[dict[str, Any]] | None = None,
     ) -> None:
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
@@ -36,7 +35,7 @@ class Store:
         self._logger = logger
         self._sqlite_cfg = sqlite_cfg or {}
         self._replication_cfg = replication_cfg or {}
-        self._sqlite_connections = sqlite_connections or sql_connections or []
+        self._sqlite_connections = sqlite_connections or []
         self._sqlite_targets: dict[str, str] = self._build_sqlite_targets()
         self._table_routes: dict[str, dict[str, Any]] = self._build_table_routes()
         self._ddl_applied: set[tuple[str, str]] = set()
