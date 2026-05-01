@@ -70,7 +70,6 @@ class App:
         self._store = Store(
             sqlite_base_dir,
             logger=self._logger,
-            sqlite_cfg=self._cfg.get("sqlite", {}),
             replication_cfg=self._cfg.get("replication", {}),
             sqlite_connections=self._cfg.get("sqlite_connections", []),
         )

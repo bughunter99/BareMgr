@@ -24,7 +24,6 @@ class Store:
         base_dir: str,
         *,
         logger=None,
-        sqlite_cfg: dict[str, Any] | None = None,
         replication_cfg: dict[str, Any] | None = None,
         sqlite_connections: list[dict[str, Any]] | None = None,
     ) -> None:
@@ -33,7 +32,6 @@ class Store:
         self._lock = threading.Lock()
         self._conns: dict[str, sqlite3.Connection] = {}
         self._logger = logger
-        self._sqlite_cfg = sqlite_cfg or {}
         self._replication_cfg = replication_cfg or {}
         self._sqlite_connections = sqlite_connections or []
         self._sqlite_targets: dict[str, str] = self._build_sqlite_targets()
