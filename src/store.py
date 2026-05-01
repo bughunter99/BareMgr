@@ -13,21 +13,21 @@ import re
 import shutil
 import sqlite3
 import threading
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
 
 class _WriteLockPool:
     def __init__(self) -> None:
-        self._locks: dict[str, threading.Lock] = {}
+        self._locks: dict[str, threading.RLock] = {}
         self._meta_lock = threading.Lock()
 
-    def get(self, key: str) -> threading.Lock:
+    def get(self, key: str) -> threading.RLock:
         with self._meta_lock:
             lock = self._locks.get(key)
             if lock is None:
-                lock = threading.Lock()
+                lock = threading.RLock()
                 self._locks[key] = lock
             return lock
 
@@ -401,6 +401,65 @@ class Store:
         )
 
     # ── 공개 API ─────────────────────────────────────────────────────
+    @contextmanager
+    def read_cursor(
+        self,
+        table: str = "_",
+        *,
+        scope: str = "system",
+        object_name: str | None = None,
+    ):
+        """읽기 전용 커서를 제공한다.
+
+        WAL 모드 덕분에 write lock 없이 병행 읽기 가능.
+        블록 종료 시 연결을 자동으로 닫는다.
+        """
+        normalized_scope = self._normalize_scope(scope)
+        if normalized_scope == "object" and not object_name:
+            raise ValueError("object_name is required when scope='object'")
+        key = self._get_db_key_for_table(
+            table or "_", scope=normalized_scope, object_name=object_name
+        )
+        conn = self._open_read_conn_for_key(key)
+        cur = conn.cursor()
+        try:
+            yield cur
+        finally:
+            cur.close()
+            conn.close()
+
+    @contextmanager
+    def write_cursor(
+        self,
+        table: str = "_",
+        *,
+        scope: str = "system",
+        object_name: str | None = None,
+    ):
+        """쓰기 커서를 제공한다.
+
+        DB 파일 단위 RLock을 blocking으로 획득한다.
+        같은 스레드에서 write_cursor 중첩 진입(또는 upsert_many 혼용)이 가능하다.
+        블록 정상 종료 시 commit, 예외 발생 시 rollback 후 lock을 해제한다.
+        """
+        normalized_scope = self._normalize_scope(scope)
+        if normalized_scope == "object" and not object_name:
+            raise ValueError("object_name is required when scope='object'")
+        key = self._get_db_key_for_table(
+            table or "_", scope=normalized_scope, object_name=object_name
+        )
+        with self._write_locks.get(key):
+            conn = self._get_write_conn_for_key(key)
+            cur = conn.cursor()
+            try:
+                yield cur
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                cur.close()
+
     def upsert_many(
         self,
         table: str,
@@ -442,31 +501,27 @@ class Store:
         scope: str = "system",
         object_name: str | None = None,
     ) -> list[dict]:
+        """SELECT 쿼리를 실행하고 list[dict]를 반환한다."""
         normalized_scope = self._normalize_scope(scope)
-        if normalized_scope == "object":
-            if not object_name:
-                raise ValueError("object_name is required when scope='object'")
-            resolved_table = table or "_"
-            conn_key = self._get_db_key_for_table(
-                resolved_table,
-                scope="object",
-                object_name=object_name,
-            )
-        elif table is None:
+
+        # scope=system 이고 table 미지정 → 단일 DB 파일인 경우 자동 선택
+        if normalized_scope == "system" and table is None:
             with self._meta_lock:
                 if len(self._write_conns) != 1:
                     raise ValueError("table is required when multiple table DB files exist")
                 conn_key = next(iter(self._write_conns))
-        else:
-            conn_key = self._get_db_key_for_table(table, scope="system")
+            conn = self._open_read_conn_for_key(conn_key)
+            try:
+                cur = conn.execute(sql, params)
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
 
-        conn = self._open_read_conn_for_key(conn_key)
-        try:
-            cur = conn.execute(sql, params)
+        with self.read_cursor(table or "_", scope=normalized_scope, object_name=object_name) as cur:
+            cur.execute(sql, params)
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
-        finally:
-            conn.close()
 
     def close(self) -> None:
         with self._meta_lock:

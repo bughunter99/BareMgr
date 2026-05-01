@@ -257,3 +257,150 @@ def test_finalize_object_sqlite_clears_connection_cache(tmp_path: Path) -> None:
         assert conn_key not in store._write_conns
     finally:
         store.close()
+
+
+# ── read_cursor / write_cursor 테스트 ────────────────────────────────
+
+def test_write_cursor_inserts_and_commits(tmp_path: Path) -> None:
+    """write_cursor 블록 정상 종료 시 commit되어야 한다."""
+    store = Store(str(tmp_path / "app12"))
+    try:
+        with store.write_cursor("inventory") as cur:
+            cur.execute(
+                'CREATE TABLE IF NOT EXISTS "inventory" (id TEXT, name TEXT)'
+            )
+            cur.execute('INSERT INTO "inventory" VALUES (?, ?)', ("1", "item1"))
+
+        rows = store.query('SELECT COUNT(*) AS cnt FROM "inventory"', table="inventory")
+        assert int(rows[0]["cnt"]) == 1
+    finally:
+        store.close()
+
+
+def test_write_cursor_rollback_on_exception(tmp_path: Path) -> None:
+    """write_cursor 블록에서 예외 발생 시 rollback되어야 한다."""
+    store = Store(str(tmp_path / "app13"))
+    try:
+        with store.write_cursor("inventory") as cur:
+            cur.execute(
+                'CREATE TABLE IF NOT EXISTS "inventory" (id TEXT, name TEXT)'
+            )
+        # 테이블 생성은 커밋됨, 이제 insert 중 예외 발생
+        try:
+            with store.write_cursor("inventory") as cur:
+                cur.execute('INSERT INTO "inventory" VALUES (?, ?)', ("2", "item2"))
+                raise RuntimeError("강제 오류")
+        except RuntimeError:
+            pass
+
+        rows = store.query('SELECT COUNT(*) AS cnt FROM "inventory"', table="inventory")
+        assert int(rows[0]["cnt"]) == 0
+    finally:
+        store.close()
+
+
+def test_read_cursor_concurrent_with_write_lock(tmp_path: Path) -> None:
+    """write_cursor가 lock을 잡고 있는 동안 read_cursor는 블록 없이 조회 가능하다."""
+    store = Store(str(tmp_path / "app14"))
+    write_started = threading.Event()
+    allow_finish = threading.Event()
+    try:
+        store.upsert_many("inventory", [{"id": "1", "name": "n1"}])
+
+        def hold_write_lock() -> None:
+            with store.write_cursor("inventory") as cur:
+                cur.execute(
+                    'INSERT INTO "inventory" (id, name) VALUES (?, ?)', ("2", "n2")
+                )
+                write_started.set()
+                assert allow_finish.wait(timeout=2.0)
+
+        writer = threading.Thread(target=hold_write_lock)
+        writer.start()
+        assert write_started.wait(timeout=1.0)
+
+        # write lock이 잡힌 상태에서도 read_cursor는 즉시 사용 가능
+        started = time.perf_counter()
+        with store.read_cursor("inventory") as cur:
+            cur.execute('SELECT COUNT(*) AS cnt FROM "inventory"')
+            cnt = cur.fetchone()[0]
+        elapsed = time.perf_counter() - started
+
+        assert elapsed < 1.0
+        assert cnt == 1  # write_cursor 미커밋 시점이므로 1건
+
+        allow_finish.set()
+        writer.join(timeout=1.0)
+    finally:
+        allow_finish.set()
+        store.close()
+
+
+def test_write_cursor_second_writer_blocks(tmp_path: Path) -> None:
+    """같은 DB 파일에 대해 두 번째 write_cursor는 첫 번째가 끝날 때까지 대기한다."""
+    store = Store(str(tmp_path / "app15"))
+    first_entered = threading.Event()
+    allow_first_exit = threading.Event()
+    second_start_times: list[float] = []
+    first_exit_time: list[float] = []
+    try:
+        with store.write_cursor("inventory") as cur:
+            cur.execute(
+                'CREATE TABLE IF NOT EXISTS "inventory" (id TEXT, name TEXT)'
+            )
+
+        def first_writer() -> None:
+            with store.write_cursor("inventory") as _cur:
+                first_entered.set()
+                assert allow_first_exit.wait(timeout=2.0)
+            first_exit_time.append(time.perf_counter())
+
+        def second_writer() -> None:
+            assert first_entered.wait(timeout=1.0)
+            second_start_times.append(time.perf_counter())
+            with store.write_cursor("inventory") as _cur:
+                pass
+
+        t1 = threading.Thread(target=first_writer)
+        t2 = threading.Thread(target=second_writer)
+        t1.start()
+        t2.start()
+
+        assert first_entered.wait(timeout=1.0)
+        time.sleep(0.1)
+        allow_first_exit.set()
+
+        t1.join(timeout=2.0)
+        t2.join(timeout=2.0)
+
+        # 두 번째 writer 진입 시도 시각이 첫 번째 종료보다 앞서야 함 (대기했다는 증거)
+        assert second_start_times[0] < first_exit_time[0]
+    finally:
+        allow_first_exit.set()
+        store.close()
+
+
+def test_write_cursor_object_scope(tmp_path: Path) -> None:
+    """object scope로 write_cursor를 사용하면 해당 객체 DB에만 쓴다."""
+    store = Store(
+        str(tmp_path / "app16"),
+        object_sqlite_types=[{"type": "AAA", "ddl_file": "ddl/object_aaa.sql"}],
+    )
+    try:
+        store.initialize_object_sqlite("abc01", "AAA")
+
+        with store.write_cursor("object_profile", scope="object", object_name="abc01") as cur:
+            cur.execute(
+                'INSERT INTO "object_profile" (obj_id, source_table, payload_json) VALUES (?, ?, ?)',
+                ("abc01", "t1", "{}"),
+            )
+
+        rows = store.query(
+            'SELECT COUNT(*) AS cnt FROM "object_profile"',
+            table="object_profile",
+            scope="object",
+            object_name="abc01",
+        )
+        assert int(rows[0]["cnt"]) == 1
+    finally:
+        store.close()
