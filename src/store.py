@@ -87,45 +87,15 @@ class Store:
             raise ValueError(f"invalid table name: {table}")
         return normalized.lower()
 
-    def _resolve_route_db_path(
-        self,
-        *,
-        path_value: str,
-        sqlite_target: str,
-        sqlite_targets: dict[str, str],
-    ) -> str:
-        if path_value:
-            p = Path(path_value)
-        elif sqlite_target:
-            target_path = sqlite_targets.get(sqlite_target, sqlite_target)
-            p = Path(target_path)
-        else:
-            return ""
-
+    def _resolve_route_db_path(self, path_value: str) -> str:
+        p = Path(path_value)
         if not p.is_absolute():
             p = Path.cwd() / p
         return str(p)
 
     def _build_table_routes(self) -> dict[str, dict[str, Any]]:
         routes: dict[str, dict[str, Any]] = {}
-        sqlite_targets: dict[str, str] = {}
-
-        for entry in self._sqlite_connections:
-            if not isinstance(entry, dict):
-                continue
-            name = str(entry.get("name", "")).strip()
-            path = str(entry.get("path", "")).strip()
-            if name and path:
-                sqlite_targets[name] = path
-
-        for name, target in (self._replication_cfg.get("sqlite_targets", {}) or {}).items():
-            if not isinstance(target, dict):
-                continue
-            path = str(target.get("path", "")).strip()
-            if path:
-                sqlite_targets.setdefault(str(name).strip(), path)
-
-        # New top-level section (preferred): sqlite_connections
+        # sqlite_connections 기반 테이블 라우팅
         for entry in self._sqlite_connections:
             if not isinstance(entry, dict):
                 continue
@@ -133,36 +103,13 @@ class Store:
             if not table:
                 continue
             path_value = str(entry.get("path", "")).strip()
-            sqlite_target = str(entry.get("sqlite", "")).strip()
-            resolved_db_path = self._resolve_route_db_path(
-                path_value=path_value,
-                sqlite_target=sqlite_target,
-                sqlite_targets=sqlite_targets,
-            )
+            if not path_value:
+                continue
+            resolved_db_path = self._resolve_route_db_path(path_value)
             routes[self._normalize_table(table)] = {
                 "db_path": resolved_db_path,
                 "ddl_file": str(entry.get("ddl_file", "")).strip(),
             }
-
-        # Legacy fallback under replication
-        for table, route in (self._replication_cfg.get("table_routes", {}) or {}).items():
-            if not isinstance(route, dict):
-                continue
-            key = self._normalize_table(str(table))
-            path_value = str(route.get("path", "")).strip()
-            sqlite_target = str(route.get("sqlite", "")).strip()
-            resolved_db_path = self._resolve_route_db_path(
-                path_value=path_value,
-                sqlite_target=sqlite_target,
-                sqlite_targets=sqlite_targets,
-            )
-            routes.setdefault(
-                key,
-                {
-                    "db_path": resolved_db_path,
-                    "ddl_file": str(route.get("ddl_file", "")).strip(),
-                },
-            )
 
         return routes
 
