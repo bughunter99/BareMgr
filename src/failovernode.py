@@ -33,9 +33,11 @@ class FailoverNode(ABC):
         self._threads: list[threading.Thread] = []
         self._status_provider = None
         self._owns_logger = logger is None
+        self._traceback = bool(logging_cfg.get("traceback", False))
         self.logger = logger or Logger(
             name=f"failover.{self.node_id}",
             log_base=self.log_base,
+            traceback=self._traceback,
         )
 
     def set_status_provider(self, provider) -> None:
@@ -75,8 +77,8 @@ class FailoverNode(ABC):
             if self._status_provider is not None:
                 try:
                     runtime_status = str(self._status_provider()).strip()
-                except Exception:
-                    self.logger.exception("[%s] status provider error", self.node_id)
+                except Exception as e:
+                    self.logger.exception("[%s] status provider error=%s", self.node_id, str(e))
                     runtime_status = "status_provider=error"
 
             if runtime_status:

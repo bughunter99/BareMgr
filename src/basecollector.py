@@ -117,7 +117,7 @@ class BaseCollector(ABC):
                             table, rows = item
                             jid = None
                         if rows:
-                            with self.logger.job_context(jid=jid, prefix=self.name.upper()) as active_jid:
+                            with self.logger.job_context(jid=jid) as active_jid:
                                 started_at = time.perf_counter()
                                 self.store.upsert_many(table, rows)
                                 elapsed = time.perf_counter() - started_at
@@ -130,8 +130,8 @@ class BaseCollector(ABC):
                                 )
                                 if self.on_collect:
                                     self.on_collect(table, rows)
-                except Exception:
-                    self.logger.exception("[Collector:%s] collect error", self.name)
+                except Exception as e:
+                    self.logger.exception("[Collector:%s] collect error=%s", self.name, str(e))
             else:
                 self.logger.debug("[Collector:%s] standby, skip", self.name)
 

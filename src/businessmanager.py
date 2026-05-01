@@ -38,6 +38,7 @@ class BusinessManager(ProcessingBase):
         self._output_table = str(section.get("output_table", "pipeline_business_results"))
         self._db_registry = build_registry(cfg)
         self._oracle_cfg = section.get("oracle", {}) or {}
+        self._oracle_db_alias = str(self._oracle_cfg.get("db", "") or self._oracle_cfg.get("source_db", "")).strip()
         self._oracle_dsn = self._resolve_oracle_dsn(self._oracle_cfg)
         _targets = (self._oracle_cfg.get("targets", {}) or {})
         self._table_aaa = str(_targets.get("AAA", "pipeline_business_aaa"))
@@ -94,9 +95,7 @@ class BusinessManager(ProcessingBase):
             return
 
         obj_id = self._resolve_obj_id(row)
-        conn = self._connection_manager.get_connection(self._oracle_dsn, threaded=True)
-        cursor = conn.cursor()
-        try:
+        def run_groups(cursor) -> None:
             # AAA domain
             aaa_rows = self._aaa.fetch_profile(cursor, obj_id) + self._aaa.fetch_detail(cursor, obj_id)
             if aaa_rows:
@@ -121,6 +120,19 @@ class BusinessManager(ProcessingBase):
             eee_rows = self._eee.fetch_events(cursor, obj_id) + self._eee.fetch_history(cursor, obj_id)
             if eee_rows:
                 self._store.upsert_many(self._table_eee, self._enrich(eee_rows, source_table, obj_id, processed_at))
+
+        if self._oracle_db_alias:
+            with self._connection_manager.cursor_by_alias(
+                self._oracle_db_alias,
+                fallback_dsn=self._oracle_dsn,
+            ) as cursor:
+                run_groups(cursor)
+            return
+
+        conn = self._connection_manager.get_connection(self._oracle_dsn, threaded=True)
+        cursor = conn.cursor()
+        try:
+            run_groups(cursor)
         finally:
             cursor.close()
 

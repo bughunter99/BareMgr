@@ -5,7 +5,7 @@ oraclejobs.py — OracleCollector가 실행할 수집 잡 코드 정의.
 각 OracleJob 필드:
     name      : 잡 식별자 (로그·체크포인트에 사용)
     table     : SQLite에 저장할 테이블명
-    db        : 실행할 DB alias (예: DB_MAIN, DB_TARGET). 비우면 collector 기본 DB 사용
+    db        : 실행할 DB alias (예: DB_MAIN, DB_TARGET). 필수
     test_rows : 테스트 모드에서 생성할 더미 행 수
 
 각 잡은 query(config, cursor) 함수를 구현해 직접 SQL 실행 + 파라미터 바인딩 +

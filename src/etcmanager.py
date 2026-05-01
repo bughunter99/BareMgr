@@ -152,7 +152,7 @@ class EtcManager:
         except Exception as exc:
             self._set_status(last_error=str(exc), last_status="error")
             self._log_run(name, task_type, "error", str(exc), 0)
-            self._logger.exception("[Etc] task=%s type=%s failed", name, task_type)
+            self._logger.exception("[Etc] task=%s type=%s failed error=%s", name, task_type, str(exc))
         finally:
             self._task_completed(name)
 

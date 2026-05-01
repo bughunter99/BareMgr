@@ -136,8 +136,8 @@ class Replicator:
                             chunk_count,
                             len(chunk_rows),
                         )
-                    except zmq.error.ZMQError:
-                        self._logger.exception("[Replicator] send error")
+                    except zmq.error.ZMQError as e:
+                        self._logger.exception("[Replicator] send error=%s", str(e))
         elapsed = time.perf_counter() - started_at
         self._logger.info(
             "[Replicator] ACTIVE published table=%s rows=%d chunks=%d peers=%d sent=%d elapsed=%.3fs",
@@ -205,9 +205,9 @@ class Replicator:
                 rows = data.get("rows", [])
                 chunk_index = int(data.get("chunk_index", 0)) + 1
                 chunk_count = int(data.get("chunk_count", 1))
-                jid = self._logger.new_jid(prefix="REP")
+                jid = self._logger.new_jid()
                 data["_jid"] = jid
-                with self._logger.job_context(jid=jid, prefix="REP"):
+                with self._logger.job_context(jid=jid):
                     self._logger.info(
                         "[Replicator] STANDBY received table=%s rows=%d chunk=%d/%d",
                         table,
@@ -218,7 +218,7 @@ class Replicator:
                 data["_received_elapsed"] = time.perf_counter() - recv_started
                 data["_enqueued_at"] = time.perf_counter()
                 self._sub_queue.put(data, timeout=1.0)
-                with self._logger.job_context(jid=jid, prefix="REP"):
+                with self._logger.job_context(jid=jid):
                     self._logger.info(
                         "[Replicator] STANDBY enqueued table=%s rows=%d queue_depth=%d",
                         table,
@@ -231,8 +231,8 @@ class Replicator:
                 pass  # RCVTIMEO 만료 → 루프 계속
             except zmq.error.ContextTerminated:
                 break
-            except Exception:
-                self._logger.exception("[Replicator] recv error")
+            except Exception as e:
+                self._logger.exception("[Replicator] recv error=%s", str(e))
 
     def _store_loop(self) -> None:
         while self._sub_running or not self._sub_queue.empty():
@@ -253,7 +253,7 @@ class Replicator:
                 enqueued_at = float(data.get("_enqueued_at", time.perf_counter()))
                 jid = data.get("_jid")
                 queue_wait = time.perf_counter() - enqueued_at
-                with self._logger.job_context(jid=jid, prefix="REP"):
+                with self._logger.job_context(jid=jid):
                     store_started = time.perf_counter()
                     self._store.replicate_message(data)
                     store_elapsed = time.perf_counter() - store_started
@@ -268,8 +268,8 @@ class Replicator:
                         store_elapsed,
                         self._sub_queue.qsize(),
                     )
-            except Exception:
-                self._logger.exception("[Replicator] store error")
+            except Exception as e:
+                self._logger.exception("[Replicator] store error=%s", str(e))
 
     # ── 전체 종료 ────────────────────────────────────────────────────
     def close(self) -> None:

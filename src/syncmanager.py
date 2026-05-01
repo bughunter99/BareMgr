@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import threading
@@ -29,8 +30,11 @@ class SyncManager(ProcessingBase):
         self._dry_run = bool(sync_cfg.get("dry_run", True))
 
         db_registry = build_registry(cfg)
+        self._db_registry = db_registry
         source_alias = str(sync_cfg.get("source_db", "")).strip()
         target_alias = str(sync_cfg.get("target_db", "")).strip()
+        self._source_db_alias = source_alias
+        self._target_db_alias = target_alias
         source_dsn = str(sync_cfg.get("source_dsn", "")).strip()
         target_dsn = str(sync_cfg.get("target_dsn", "")).strip()
 
@@ -67,13 +71,29 @@ class SyncManager(ProcessingBase):
         if not self._source_dsn:
             return 0
 
-        conn = self._conn_manager.get_connection(self._source_dsn, threaded=True)
-        cur = conn.cursor()
-        try:
-            validate_oracle_connection(conn)
+        with self._open_cursor(
+            db_alias=self._source_db_alias,
+            dsn=self._source_dsn,
+        ) as cur:
             cur.execute(f"SELECT COUNT(1) FROM {table}")
             row = cur.fetchone()
             return int(row[0]) if row else 0
+
+    @contextmanager
+    def _open_cursor(self, *, db_alias: str, dsn: str):
+        if db_alias:
+            with self._conn_manager.cursor_by_alias(
+                db_alias,
+                fallback_dsn=dsn,
+            ) as cur:
+                yield cur
+            return
+
+        conn = self._conn_manager.get_connection(dsn, threaded=True)
+        cur = conn.cursor()
+        try:
+            validate_oracle_connection(conn)
+            yield cur
         finally:
             cur.close()
 

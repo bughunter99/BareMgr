@@ -74,8 +74,8 @@ class FailoverNodeZmq(FailoverNode):
                     time.sleep(0.1)
                 except zmq.error.ContextTerminated:
                     break
-                except Exception:
-                    self.logger.exception("[%s] heartbeat server error", self.node_id)
+                except Exception as e:
+                    self.logger.exception("[%s] heartbeat server error=%s", self.node_id, str(e))
                     time.sleep(0.1)
         finally:
             sock.close(0)
@@ -106,12 +106,13 @@ class FailoverNodeZmq(FailoverNode):
                 except zmq.error.ContextTerminated:
                     sock.close(0)
                     return
-                except Exception:
+                except Exception as e:
                     if self._peer_reachable.get(peer_addr, True):
                         self.logger.warning(
-                            "[%s] heartbeat failed peer=%s",
+                            "[%s] heartbeat failed peer=%s error=%s",
                             self.node_id,
                             peer_addr,
+                            str(e),
                         )
                     self._peer_reachable[peer_addr] = False
                 finally:

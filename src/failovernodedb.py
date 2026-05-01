@@ -67,8 +67,8 @@ class FailoverNodeDb(FailoverNode):
                     self.logger.info("[%s] Received DB stop command", self.node_id)
                     self.stop()
                     return
-            except Exception:
-                self.logger.exception("[%s] db command watcher error", self.node_id)
+            except Exception as e:
+                self.logger.exception("[%s] db command watcher error=%s", self.node_id, str(e))
                 self._reset_conn()
             time.sleep(self._cmd_poll_interval_sec)
 
@@ -76,8 +76,8 @@ class FailoverNodeDb(FailoverNode):
         while self.running:
             try:
                 self._write_heartbeat()
-            except Exception:
-                self.logger.exception("[%s] db heartbeat write error", self.node_id)
+            except Exception as e:
+                self.logger.exception("[%s] db heartbeat write error=%s", self.node_id, str(e))
                 self._reset_conn()
             time.sleep(self.heartbeat_interval)
 
@@ -96,8 +96,8 @@ class FailoverNodeDb(FailoverNode):
                         is_leader = False
 
                 self._set_active(is_leader)
-            except Exception:
-                self.logger.exception("[%s] db leader election error", self.node_id)
+            except Exception as e:
+                self.logger.exception("[%s] db leader election error=%s", self.node_id, str(e))
                 self._reset_conn()
 
             time.sleep(self.heartbeat_interval)
@@ -112,8 +112,8 @@ class FailoverNodeDb(FailoverNode):
     def _cleanup(self) -> None:
         try:
             self._delete_heartbeat()
-        except Exception:
-            self.logger.exception("[%s] db heartbeat delete error", self.node_id)
+        except Exception as e:
+            self.logger.exception("[%s] db heartbeat delete error=%s", self.node_id, str(e))
         self._close_conn()
 
     def _normalize_table_name(self, table_name: str) -> str:

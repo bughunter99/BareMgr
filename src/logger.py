@@ -28,10 +28,10 @@ import multiprocessing
 import threading
 import sys
 import time
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
-from itertools import count
 from pathlib import Path
 
 
@@ -46,14 +46,10 @@ CRITICAL = logging.CRITICAL
 
 
 _current_jid: ContextVar[str] = ContextVar("current_jid", default="-")
-_jid_counter = count(1)
-_jid_lock = threading.Lock()
 
 
-def _next_jid(prefix: str = "JOB") -> str:
-    with _jid_lock:
-        number = next(_jid_counter)
-    return f"{prefix}-{number:08d}"
+def _next_jid() -> str:
+    return str(uuid.uuid4())[0:8]
 
 
 class _JobContextFilter(logging.Filter):
@@ -175,6 +171,7 @@ class Logger:
         ),
         encoding: str  = "utf-8",
         console: bool  = False,
+        traceback: bool = False,
     ) -> None:
         self.name     = name
         self.log_base = log_base
@@ -182,6 +179,7 @@ class Logger:
         self.fmt      = fmt
         self.encoding = encoding
         self.console  = console
+        self.traceback = bool(traceback)
 
         # ── 큐 (멀티프로세싱 / 멀티스레딩 공용) ──────────
         self._queue: multiprocessing.Queue = multiprocessing.Queue(-1)
@@ -242,16 +240,16 @@ class Logger:
         self.stop()
 
     @contextmanager
-    def job_context(self, jid: str | None = None, prefix: str = "JOB"):
-        job_id = jid or _next_jid(prefix)
+    def job_context(self, jid: str | None = None):
+        job_id = jid or _next_jid()
         token = _current_jid.set(job_id)
         try:
             yield job_id
         finally:
             _current_jid.reset(token)
 
-    def new_jid(self, prefix: str = "JOB") -> str:
-        return _next_jid(prefix)
+    def new_jid(self) -> str:
+        return _next_jid()
 
     # ── 로깅 메서드 ──────────────────────────────
     def debug(self, msg: str, *args, **kwargs) -> None:
@@ -270,7 +268,10 @@ class Logger:
         self._logger.critical(msg, *args, **kwargs)
 
     def exception(self, msg: str, *args, **kwargs) -> None:
-        self._logger.exception(msg, *args, **kwargs)
+        if self.traceback:
+            self._logger.exception(msg, *args, **kwargs)
+            return
+        self._logger.error(msg, *args, **kwargs)
 
     def log(self, level: int, msg: str, *args, **kwargs) -> None:
         self._logger.log(level, msg, *args, **kwargs)

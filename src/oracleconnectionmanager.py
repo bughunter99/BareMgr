@@ -1,19 +1,35 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from contextlib import contextmanager
+import time
 import threading
 from typing import Any
 
+from .db_registry import resolve_dsn, resolve_pool_cfg
 from .oracle_driver import get_cx_oracle
 from .oracle_utils import makeDictFactory, validate_oracle_connection
 
 
 class OracleConnectionManager:
-    def __init__(self, logger=None) -> None:
+    def __init__(
+        self,
+        logger=None,
+        *,
+        cursor_acquire_timeout_sec: float = 30.0,
+        db_registry: dict[str, dict] | None = None,
+    ) -> None:
         self._logger = logger
         self._lock = threading.Lock()
         self._connections: dict[tuple[str, bool], Any] = {}
         self._session_pools: dict[tuple[str, str, str, int, int, int, bool, str], Any] = {}
+        self._db_registry: dict[str, dict] = dict(db_registry or {})
+        self._cursor_acquire_timeout_sec = (
+            float(cursor_acquire_timeout_sec) if float(cursor_acquire_timeout_sec) > 0 else 30.0
+        )
+
+    def set_db_registry(self, db_registry: dict[str, dict] | None) -> None:
+        self._db_registry = dict(db_registry or {})
 
     def get_connection(self, dsn: str, *, threaded: bool = True) -> Any:
         normalized_dsn = str(dsn).strip()
@@ -139,6 +155,73 @@ class OracleConnectionManager:
         finally:
             cursor.close()
             pool.release(conn)
+
+    @contextmanager
+    def cursor_by_alias(
+        self,
+        db_alias: str,
+        timeout: float | None = None,
+        *,
+        fallback_dsn: str = "",
+    ):
+        """db alias 기준으로 cursor를 열고 자동 정리한다.
+
+        - alias의 pool.enabled=true면 session pool에서 acquire (timeout 적용)
+        - 아니면 alias로 resolve_dsn 후 shared connection에서 cursor 반환
+        """
+        alias = str(db_alias or "").strip()
+        if not alias:
+            raise ValueError("db alias is required")
+
+        wait = self._cursor_acquire_timeout_sec if timeout is None else float(timeout)
+        if wait <= 0:
+            wait = self._cursor_acquire_timeout_sec
+
+        pool_cfg = resolve_pool_cfg(self._db_registry, alias)
+        pool_enabled = bool(pool_cfg.get("enabled", False))
+
+        pool = None
+        conn = None
+        cursor = None
+        try:
+            if pool_enabled:
+                pool = self.get_session_pool(pool_cfg)
+                if pool is None:
+                    raise ValueError(
+                        f"oracle session pool is required alias={alias}"
+                    )
+                deadline = time.monotonic() + wait
+                while conn is None:
+                    try:
+                        conn = pool.acquire()
+                    except Exception as e:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(
+                                f"oracle cursor acquire timed out alias={alias} wait={wait}s"
+                            ) from e
+                        time.sleep(0.05)
+            else:
+                dsn = resolve_dsn(self._db_registry, alias, fallback=fallback_dsn)
+                if not str(dsn).strip():
+                    raise ValueError(
+                        f"oracle dsn is required alias={alias}"
+                    )
+                conn = self.get_connection(dsn, threaded=True)
+
+            validate_oracle_connection(conn)
+            cursor = conn.cursor()
+            yield cursor
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if pool is not None and conn is not None:
+                try:
+                    pool.release(conn)
+                except Exception:
+                    pass
 
     def close_all(self) -> None:
         with self._lock:

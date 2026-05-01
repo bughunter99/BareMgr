@@ -124,9 +124,9 @@ class SplunkCollector(BaseCollector):
         collected: list[tuple[str, list[dict], str]] = []
 
         for job in self._jobs:
-            jid = self.logger.new_jid(prefix="SPL")
+            jid = self.logger.new_jid()
 
-            with self.logger.job_context(jid=jid, prefix="SPL"):
+            with self.logger.job_context(jid=jid):
                 try:
                     if not self._use_splunk_search and service is None:
                         service = self._get_service()
@@ -144,11 +144,12 @@ class SplunkCollector(BaseCollector):
                         len(rows),
                         elapsed,
                     )
-                except Exception:
+                except Exception as e:
                     self.logger.exception(
-                        "[SplunkCollector] job=%s table=%s error; continue",
+                        "[SplunkCollector] job=%s table=%s error=%s; continue",
                         job.name,
                         job.table,
+                        str(e),
                     )
                     self._close_service()
                     service = None
@@ -168,8 +169,8 @@ class SplunkCollector(BaseCollector):
         results: list[tuple[str, list[dict], str]] = []
         for job in self._jobs:
             rows_count = job.test_rows
-            jid = self.logger.new_jid(prefix="SPL")
-            with self.logger.job_context(jid=jid, prefix="SPL"):
+            jid = self.logger.new_jid()
+            with self.logger.job_context(jid=jid):
                 started_at = time.perf_counter()
                 rows = [
                     {

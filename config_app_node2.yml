@@ -34,6 +34,7 @@ failover:
 
 logging:
   log_base: logs/app_node2
+  traceback: false
 
 oracle_client:
   lib_dir: ""
@@ -189,6 +190,7 @@ collectors:
     enabled: true
     db: DB_MAIN
     interval_sec: 60
+    cursor_acquire_timeout_sec: 30
     test:
       enabled: true
       emit_once: false

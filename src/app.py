@@ -55,10 +55,14 @@ class App:
         self._logger = Logger(
             name=f"app.{self._cfg['node_id']}",
             log_base=logging_cfg.get("log_base", self._cfg.get("log_base", "logs/app")),
+            traceback=bool(logging_cfg.get("traceback", False)),
         )
         init_oracle_client_from_config(self._cfg, logger=self._logger)
-        self._oracle_connection_manager = OracleConnectionManager(self._logger)
         self._db_registry = build_registry(self._cfg)
+        self._oracle_connection_manager = OracleConnectionManager(
+            self._logger,
+            db_registry=self._db_registry,
+        )
 
         # ── 저장소 ───────────────────────────────────────────────────
         node_id = str(self._cfg.get("node_id", "")).strip()
@@ -138,7 +142,6 @@ class App:
                     logger=self._logger,
                     on_collect=self._on_collect,
                     connection_manager=self._oracle_connection_manager,
-                    db_registry=self._db_registry,
                 )
             )
 

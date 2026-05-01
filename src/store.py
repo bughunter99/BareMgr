@@ -252,12 +252,13 @@ class Store:
                                 )
                     finally:
                         cur.close()
-            except Exception:
+            except Exception as e:
                 if self._logger is not None:
                     self._logger.exception(
-                        "[Store] ddl init failed table=%s ddl=%s",
+                        "[Store] ddl init failed table=%s ddl=%s error=%s",
                         table,
                         ddl_file,
+                        str(e),
                     )
 
     def initialize_object_sqlite(self, object_name: str, object_type: str) -> Path:

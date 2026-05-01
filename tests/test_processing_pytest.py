@@ -178,7 +178,13 @@ def test_processing_and_collector_share_connection_manager_for_same_dsn(tmp_path
     data_dir = tmp_path / "app1"
     store = Store(str(data_dir))
     log = Logger(name="test.processing.shared", log_base=str(tmp_path / "logs" / "processing-shared"), console=False)
-    manager = OracleConnectionManager(log)
+    manager = OracleConnectionManager(
+        log,
+        db_registry={
+            "DB_MAIN": {"tns": "shared-dsn"},
+            "DB_TARGET": {"tns": "shared-dsn"},
+        },
+    )
 
     cfg = {
         "node_id": "node-test",

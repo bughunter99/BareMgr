@@ -105,8 +105,8 @@ class _PeriodicJobRunner:
                     "options": self.options,
                 }
                 self._callback(ctx)
-            except Exception:
-                self._logger.exception("[Orchestrator] job=%s run failed", self._name)
+            except Exception as e:
+                self._logger.exception("[Orchestrator] job=%s run failed error=%s", self._name, str(e))
             finally:
                 self._lock.release()
 

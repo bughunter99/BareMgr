@@ -99,7 +99,7 @@ class ProcessingBase(ABC):
         except Exception as exc:
             self._increment_status("failed")
             self._set_status(last_error=str(exc))
-            self._logger.exception("[%s] worker failed", self._job_name)
+            self._logger.exception("[%s] worker failed error=%s", self._job_name, str(exc))
         finally:
             self._adjust_active_workers(-1)
             self._decrement_queue_depth()

@@ -12,14 +12,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import time
-from typing import Any
 from typing import TYPE_CHECKING
 
 from .basecollector import BaseCollector
-from .db_registry import resolve_dsn, resolve_pool_cfg
 from .oracleconnectionmanager import OracleConnectionManager
 from .oraclejobs import ORACLE_JOBS, OracleJob
-from .oracle_utils import validate_oracle_connection
 
 if TYPE_CHECKING:
     from .store import Store
@@ -34,7 +31,6 @@ class OracleCollector(BaseCollector):
         logger: "Logger",
         on_collect=None,
         connection_manager: OracleConnectionManager | None = None,
-        db_registry: dict | None = None,
     ) -> None:
         super().__init__(
             name="oracle",
@@ -44,7 +40,6 @@ class OracleCollector(BaseCollector):
             on_collect=on_collect,
         )
         self._cfg: dict = cfg
-        self._dsn: str = cfg["dsn"] if "dsn" in cfg else ""
         self._jobs: list[OracleJob] = list(ORACLE_JOBS)
         self._test_cfg: dict = cfg.get("test", {})
         self._test_mode: bool = cfg.get("test_mode", False) or self._test_cfg.get("enabled", False)
@@ -58,50 +53,10 @@ class OracleCollector(BaseCollector):
         }
         self._connection_manager = connection_manager or OracleConnectionManager(logger)
         self._owns_connection_manager = connection_manager is None
-        # db: alias 우선, 없으면 dsn: fallback
-        self._db_registry: dict[str, dict] = db_registry or {}
-        self._default_db_alias = str(cfg.get("db", "")).strip()
-        if self._default_db_alias:
-            self._dsn = resolve_dsn(self._db_registry, self._default_db_alias, fallback=self._dsn)
-        # pool: alias 우선, 없으면 oracle_pool 섹션 fallback
-        pool_from_alias = resolve_pool_cfg(self._db_registry, self._default_db_alias)
-        legacy_pool = cfg.get("oracle_pool", {}) or {}
-        self._default_pool_cfg = pool_from_alias or legacy_pool
-        self._default_pool_enabled = bool(self._default_pool_cfg.get("enabled", False))
+        # alias 기반 연결만 허용한다.
 
-    # ── 연결 관리 ────────────────────────────────────────────────────
-    def _get_conn(self, dsn: str):
-        return self._connection_manager.get_connection(dsn, threaded=True)
-
-    def _close_conn(self, dsn: str) -> None:
-        self._connection_manager.invalidate(dsn, threaded=True)
-
-    def _acquire_conn(self, *, dsn: str, pool_cfg: dict[str, Any], pool_enabled: bool):
-        if pool_enabled:
-            pool = self._connection_manager.get_session_pool(pool_cfg)
-            return pool.acquire(), pool
-        return self._get_conn(dsn), None
-
-    def _resolve_job_connection(self, job: OracleJob) -> tuple[str, dict[str, Any], bool, str]:
-        job_db_alias = str(job.db).strip() or self._default_db_alias
-        dsn = self._dsn
-        if job_db_alias:
-            dsn = resolve_dsn(self._db_registry, job_db_alias, fallback=dsn)
-
-        pool_cfg = self._default_pool_cfg
-        pool_enabled = self._default_pool_enabled
-        if job_db_alias:
-            alias_pool_cfg = resolve_pool_cfg(self._db_registry, job_db_alias)
-            if alias_pool_cfg:
-                pool_cfg = alias_pool_cfg
-                pool_enabled = bool(pool_cfg.get("enabled", False))
-
-        if not str(dsn).strip():
-            raise ValueError(
-                f"Oracle DSN is required for job={job.name}. Check job.db alias or collectors.oracle.dsn"
-            )
-
-        return dsn, pool_cfg, pool_enabled, job_db_alias
+    def _resolve_job_db_alias(self, job: OracleJob) -> str:
+        return str(job.db).strip()
 
     # ── 수집 ────────────────────────────────────────────────────────
     def collect(self) -> list[tuple[str, list[dict], str]]:
@@ -111,27 +66,22 @@ class OracleCollector(BaseCollector):
         results: list[tuple[str, list[dict], str]] = []
 
         for job in self._jobs:
-            jid = self.logger.new_jid(prefix="ORA")
-            with self.logger.job_context(jid=jid, prefix="ORA"):
-                dsn = ""
+            jid = self.logger.new_jid()
+            with self.logger.job_context(jid=jid):
                 job_db_alias = ""
-                conn = None
-                _pool = None
-                cursor = None
-                failed = False
                 try:
-                    dsn, pool_cfg, pool_enabled, job_db_alias = self._resolve_job_connection(job)
-                    conn, _pool = self._acquire_conn(
-                        dsn=dsn,
-                        pool_cfg=pool_cfg,
-                        pool_enabled=pool_enabled,
-                    )
-                    validate_oracle_connection(conn)
-                    cursor = conn.cursor()
-                    started_at = time.perf_counter()
-                    runtime_cfg = dict(self._cfg)
-                    runtime_cfg["_last_ts"] = self._last_ts[job.name]
-                    rows = job.query(runtime_cfg, cursor)
+                    job_db_alias = self._resolve_job_db_alias(job)
+                    if not job_db_alias:
+                        raise ValueError(
+                            f"Oracle job.db alias is required for job={job.name}."
+                        )
+                    with self._connection_manager.cursor_by_alias(
+                        job_db_alias,
+                    ) as cursor:
+                        started_at = time.perf_counter()
+                        runtime_cfg = dict(self._cfg)
+                        runtime_cfg["_last_ts"] = self._last_ts[job.name]
+                        rows = job.query(runtime_cfg, cursor)
                     collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                     elapsed = time.perf_counter() - started_at
                     if rows:
@@ -145,31 +95,15 @@ class OracleCollector(BaseCollector):
                         len(rows),
                         elapsed,
                     )
-                except Exception:
-                    failed = True
+                except Exception as e:
                     self.logger.exception(
-                        "[OracleCollector] job=%s db=%s table=%s query error; continue",
+                        "[OracleCollector] job=%s db=%s table=%s query error=%s; continue",
                         job.name,
                         job_db_alias or "<default>",
                         job.table,
+                        str(e),
                     )
                     continue
-                finally:
-                    if cursor is not None:
-                        try:
-                            cursor.close()
-                        except Exception:
-                            pass
-                    if conn is not None and _pool is not None:
-                        try:
-                            _pool.release(conn)
-                        except Exception:
-                            pass
-                    elif failed and conn is not None and dsn:
-                        try:
-                            self._close_conn(dsn)
-                        except Exception:
-                            pass
 
         return results
 
@@ -186,8 +120,8 @@ class OracleCollector(BaseCollector):
         results: list[tuple[str, list[dict], str]] = []
         for job in self._jobs:
             rows_count = job.test_rows
-            jid = self.logger.new_jid(prefix="ORA")
-            with self.logger.job_context(jid=jid, prefix="ORA"):
+            jid = self.logger.new_jid()
+            with self.logger.job_context(jid=jid):
                 started_at = time.perf_counter()
                 rows = [
                     {
