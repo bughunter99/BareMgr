@@ -43,6 +43,7 @@ class BaseCollector(ABC):
         self._running = False
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._wakeup = threading.Event()
 
     # ── 서브클래스 구현 ───────────────────────────────────────────────
     @abstractmethod
@@ -55,8 +56,13 @@ class BaseCollector(ABC):
 
     # ── 활성화 제어 ──────────────────────────────────────────────────
     def set_active(self, active: bool) -> None:
+        became_active = False
         with self._lock:
+            became_active = (not self._active) and active
             self._active = active
+        if became_active:
+            # ACTIVE 전환 시 interval 대기를 즉시 깨워 바로 수집 사이클로 진입한다.
+            self._wakeup.set()
 
     @property
     def is_active(self) -> bool:
@@ -93,6 +99,7 @@ class BaseCollector(ABC):
     def stop(self) -> None:
         with self._lock:
             self._running = False
+        self._wakeup.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=max(2, self.interval_sec * 0.1))
         self.logger.info("[Collector:%s] stopped", self.name)
@@ -132,4 +139,6 @@ class BaseCollector(ABC):
             for _ in range(self.interval_sec):
                 if not self._running:
                     break
-                time.sleep(1)
+                if self._wakeup.wait(timeout=1):
+                    self._wakeup.clear()
+                    break
