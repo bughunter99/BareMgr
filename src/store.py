@@ -14,8 +14,23 @@ import json
 import re
 import sqlite3
 import threading
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
+
+
+class _WriteLockPool:
+    def __init__(self) -> None:
+        self._locks: dict[str, threading.Lock] = {}
+        self._meta_lock = threading.Lock()
+
+    def get(self, key: str) -> threading.Lock:
+        with self._meta_lock:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._locks[key] = lock
+            return lock
 
 
 class Store:
@@ -29,14 +44,16 @@ class Store:
     ) -> None:
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
-        self._conns: dict[str, sqlite3.Connection] = {}
+        self._meta_lock = threading.Lock()
+        self._write_conns: dict[str, sqlite3.Connection] = {}
+        self._write_locks = _WriteLockPool()
         self._logger = logger
         self._replication_cfg = replication_cfg or {}
         self._sqlite_connections = sqlite_connections or []
         self._sqlite_targets: dict[str, str] = self._build_sqlite_targets()
         self._table_routes: dict[str, dict[str, Any]] = self._build_table_routes()
         self._ddl_applied: set[tuple[str, str]] = set()
+        self._closed = False
 
     def _normalize_table(self, table: str) -> str:
         normalized = re.sub(r"[^A-Za-z0-9_]", "_", table).strip("_")
@@ -124,18 +141,39 @@ class Store:
 
         return self._base_dir / f"{key}.db"
 
-    def _get_conn_for_table(self, table: str) -> tuple[sqlite3.Connection, str]:
-        db_path = self._resolve_db_path(table)
-        key = str(db_path.resolve())
-        conn = self._conns.get(key)
-        if conn is not None:
-            return conn, key
-
-        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    def _configure_conn(self, conn: sqlite3.Connection, *, read_only: bool) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
-        self._conns[key] = conn
-        return conn, key
+        conn.execute("PRAGMA busy_timeout=5000")
+        if read_only:
+            conn.execute("PRAGMA query_only=ON")
+        return conn
+
+    def _get_db_key_for_table(self, table: str) -> str:
+        db_path = self._resolve_db_path(table)
+        return str(db_path.resolve())
+
+    def _get_write_conn_for_key(self, key: str) -> sqlite3.Connection:
+        with self._meta_lock:
+            if self._closed:
+                raise RuntimeError("store is closed")
+            conn = self._write_conns.get(key)
+            if conn is not None:
+                return conn
+
+            conn = self._configure_conn(sqlite3.connect(key, check_same_thread=False), read_only=False)
+            self._write_conns[key] = conn
+            return conn
+
+    def _get_write_conn_for_table(self, table: str) -> tuple[sqlite3.Connection, str]:
+        key = self._get_db_key_for_table(table)
+        return self._get_write_conn_for_key(key), key
+
+    def _open_read_conn_for_key(self, key: str) -> sqlite3.Connection:
+        with self._meta_lock:
+            if self._closed:
+                raise RuntimeError("store is closed")
+        return self._configure_conn(sqlite3.connect(key, check_same_thread=False), read_only=True)
 
     @property
     def base_dir(self) -> Path:
@@ -160,51 +198,52 @@ class Store:
         if not self._table_routes:
             return
 
-        with self._lock:
-            for table, route in self._table_routes.items():
-                ddl_file = str(route.get("ddl_file", "")).strip()
-                if not ddl_file:
-                    continue
+        for table, route in self._table_routes.items():
+            ddl_file = str(route.get("ddl_file", "")).strip()
+            if not ddl_file:
+                continue
 
-                conn = None
-                conn_key = ""
-                try:
-                    conn, conn_key = self._get_conn_for_table(table)
+            conn = None
+            conn_key = ""
+            try:
+                conn, conn_key = self._get_write_conn_for_table(table)
+                with self._write_locks.get(conn_key):
                     cur = conn.cursor()
-                    exists_before = self._table_exists(cur, table)
-                    if exists_before:
-                        if self._logger is not None:
-                            self._logger.info(
-                                "[Store] ddl check table=%s already exists", table
-                            )
-                        self._ddl_applied.add((conn_key, table))
-                        cur.close()
-                        continue
+                    try:
+                        exists_before = self._table_exists(cur, table)
+                        if exists_before:
+                            if self._logger is not None:
+                                self._logger.info(
+                                    "[Store] ddl check table=%s already exists", table
+                                )
+                            self._ddl_applied.add((conn_key, table))
+                            continue
 
-                    self._apply_route_ddl_if_needed(cur, table, conn_key=conn_key)
-                    conn.commit()
-                    exists_after = self._table_exists(cur, table)
-                    if self._logger is not None:
-                        if exists_after:
-                            self._logger.info(
-                                "[Store] ddl applied table=%s ddl=%s created",
-                                table,
-                                ddl_file,
-                            )
-                        else:
-                            self._logger.warning(
-                                "[Store] ddl applied but table missing table=%s ddl=%s",
-                                table,
-                                ddl_file,
-                            )
-                    cur.close()
-                except Exception:
-                    if self._logger is not None:
-                        self._logger.exception(
-                            "[Store] ddl init failed table=%s ddl=%s",
-                            table,
-                            ddl_file,
-                        )
+                        self._apply_route_ddl_if_needed(cur, table, conn_key=conn_key)
+                        conn.commit()
+                        exists_after = self._table_exists(cur, table)
+                        if self._logger is not None:
+                            if exists_after:
+                                self._logger.info(
+                                    "[Store] ddl applied table=%s ddl=%s created",
+                                    table,
+                                    ddl_file,
+                                )
+                            else:
+                                self._logger.warning(
+                                    "[Store] ddl applied but table missing table=%s ddl=%s",
+                                    table,
+                                    ddl_file,
+                                )
+                    finally:
+                        cur.close()
+            except Exception:
+                if self._logger is not None:
+                    self._logger.exception(
+                        "[Store] ddl init failed table=%s ddl=%s",
+                        table,
+                        ddl_file,
+                    )
 
     def _apply_route_ddl_if_needed(
         self,
@@ -272,12 +311,15 @@ class Store:
         """rows를 table에 일괄 삽입/갱신. 삽입된 행 수 반환."""
         if not rows:
             return 0
-        with self._lock:
-            conn, conn_key = self._get_conn_for_table(table)
+        conn, conn_key = self._get_write_conn_for_table(table)
+        with self._write_locks.get(conn_key):
             cur = conn.cursor()
-            self._upsert_rows(cur, table, rows, conn_key=conn_key)
-            conn.commit()
-            return cur.rowcount
+            try:
+                self._upsert_rows(cur, table, rows, conn_key=conn_key)
+                conn.commit()
+                return cur.rowcount
+            finally:
+                cur.close()
 
     def replicate_from(self, payload: bytes) -> None:
         """replicator가 받은 직렬화 페이로드를 그대로 저장."""
@@ -298,20 +340,32 @@ class Store:
         return json.dumps(payload, ensure_ascii=False, default=str).encode()
 
     def query(self, sql: str, params: tuple = (), table: str | None = None) -> list[dict]:
-        with self._lock:
-            if table is None:
-                if len(self._conns) == 1:
-                    conn = next(iter(self._conns.values()))
-                else:
+        if table is None:
+            with self._meta_lock:
+                if len(self._write_conns) != 1:
                     raise ValueError("table is required when multiple table DB files exist")
-            else:
-                conn, _ = self._get_conn_for_table(table)
+                conn_key = next(iter(self._write_conns))
+        else:
+            conn_key = self._get_db_key_for_table(table)
+
+        conn = self._open_read_conn_for_key(conn_key)
+        try:
             cur = conn.execute(sql, params)
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
+        finally:
+            conn.close()
 
     def close(self) -> None:
-        with self._lock:
-            for conn in self._conns.values():
+        with self._meta_lock:
+            if self._closed:
+                return
+            self._closed = True
+            conn_items = sorted(self._write_conns.items())
+            self._write_conns = {}
+
+        with ExitStack() as stack:
+            for conn_key, _conn in conn_items:
+                stack.enter_context(self._write_locks.get(conn_key))
+            for _conn_key, conn in conn_items:
                 conn.close()
-            self._conns.clear()
