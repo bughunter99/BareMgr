@@ -3,6 +3,7 @@ import src.splunkcollector as splunk_collector_module
 from src.splunkcollector import SplunkCollector
 from src.splunk_jobs import SplunkJob
 from src.store import Store
+from src.appconfig import AppConfig
 
 
 def test_splunk_collector_runs_job_query_method(tmp_path, monkeypatch) -> None:
@@ -33,13 +34,15 @@ def test_splunk_collector_runs_job_query_method(tmp_path, monkeypatch) -> None:
     store = Store(str(tmp_path / "app1"))
     log = Logger(name="test.splunk.collector", log_base=str(tmp_path / "logs" / "splunk-collector"), console=False)
     collector = SplunkCollector(
-        cfg={
-            "base_url": "http://local",
-            "splunk_token": "t",
-            "query_params": {"level": "ERROR"},
-        },
         store=store,
         logger=log,
+        app_config=AppConfig({
+            "splunk": {
+                "base_url": "http://local",
+                "splunk_token": "t",
+                "query_params": {"level": "ERROR"},
+            }
+        }),
     )
 
     monkeypatch.setattr(splunk_collector_module, "SPLUNK_JOBS", [QueryOnlySplunkJob()])
@@ -83,9 +86,9 @@ def test_splunk_collector_job_query_handles_row_processing(tmp_path, monkeypatch
     store = Store(str(tmp_path / "app2"))
     log = Logger(name="test.splunk.collector.chain", log_base=str(tmp_path / "logs" / "splunk-collector-chain"), console=False)
     collector = SplunkCollector(
-        cfg={"base_url": "http://local", "splunk_token": "t"},
         store=store,
         logger=log,
+        app_config=AppConfig({"splunk": {"base_url": "http://local", "splunk_token": "t"}}),
     )
 
     monkeypatch.setattr(splunk_collector_module, "SPLUNK_JOBS", [ProcessingInsideQueryJob()])
@@ -121,9 +124,9 @@ def test_splunk_collector_continues_after_job_error(tmp_path, monkeypatch) -> No
     store = Store(str(tmp_path / "app3"))
     log = Logger(name="test.splunk.collector.continue", log_base=str(tmp_path / "logs" / "splunk-collector-continue"), console=False)
     collector = SplunkCollector(
-        cfg={"base_url": "http://local", "splunk_token": "t"},
         store=store,
         logger=log,
+        app_config=AppConfig({"splunk": {"base_url": "http://local", "splunk_token": "t"}}),
     )
 
     monkeypatch.setattr(splunk_collector_module, "SPLUNK_JOBS", [FailingSplunkJob(), SuccessSplunkJob()])

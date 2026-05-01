@@ -5,15 +5,24 @@ from datetime import datetime
 import re
 import threading
 import time
+from typing import TYPE_CHECKING
 
 from .failovernode import FailoverNode
 from .logger import Logger
 from .oracle_driver import get_cx_oracle
 
+if TYPE_CHECKING:
+    from .appconfig import AppConfig
+
 
 class FailoverNodeDb(FailoverNode):
-    def __init__(self, config_file: str, logger: Logger | None = None):
-        super().__init__(config_file=config_file, logger=logger)
+    def __init__(
+        self,
+        config_file: str,
+        logger: Logger | None = None,
+        app_config: "AppConfig | None" = None,
+    ):
+        super().__init__(config_file=config_file, logger=logger, app_config=app_config)
         failover_cfg = self.config.get("failover", {})
         db_cfg = failover_cfg.get("db", {})
 

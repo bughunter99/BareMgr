@@ -19,6 +19,7 @@ from .splunk_jobs import SPLUNK_JOBS, SplunkJob
 from .splunksearch import SplunkSearch, configure_splunk_search
 
 if TYPE_CHECKING:
+    from .appconfig import AppConfig
     from .store import Store
     from .logger import Logger
 
@@ -26,11 +27,12 @@ if TYPE_CHECKING:
 class SplunkCollector(BaseCollector):
     def __init__(
         self,
-        cfg: dict,
         store: "Store",
         logger: "Logger",
         on_collect=None,
+        app_config: "AppConfig | None" = None,
     ) -> None:
+        cfg = ((app_config.get("splunk", {}) or app_config.collectors_cfg.get("splunk", {})) if app_config is not None else {})
         super().__init__(
             name="splunk",
             interval_sec=cfg.get("interval_sec", 120),

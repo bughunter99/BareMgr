@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import zmq
 
 if TYPE_CHECKING:
+    from .appconfig import AppConfig
     from .store import Store
     from .logger import Logger
 
@@ -34,17 +35,18 @@ if TYPE_CHECKING:
 class Replicator:
     def __init__(
         self,
-        cfg: dict,
         store: "Store",
         logger: "Logger",
+        app_config: "AppConfig | None" = None,
     ) -> None:
         """
-        cfg: config["replication"]
+        app_config: config wrapper
             {
                 "port": 5556,
                 "peers": ["192.168.1.10:5556", "192.168.1.11:5556"]
             }
         """
+        cfg = (app_config.section("replication") or {}) if app_config is not None else {}
         self._port: int = cfg["port"]
         self._peers: list[str] = cfg.get("peers", [])
         self._chunk_rows: int = int(cfg.get("chunk_rows", 1000))

@@ -8,6 +8,7 @@ from src.oraclecollector import OracleCollector
 from src.oraclejobs import OracleJob
 from src.oracle_utils import makeDictFactory
 from src.store import Store
+from src.appconfig import AppConfig
 
 
 def _install_fake_cx_oracle(monkeypatch, make_connection) -> None:
@@ -102,7 +103,7 @@ def test_oracle_collector_runs_job_query_method(tmp_path, monkeypatch) -> None:
         },
     )
     collector = OracleCollector(
-        cfg={"db": "DB_MAIN"},
+        app_config=AppConfig({"collectors": {"oracle": {"db": "DB_MAIN"}}}),
         store=store,
         logger=log,
         connection_manager=manager,
@@ -196,7 +197,7 @@ def test_oracle_collector_can_resolve_different_db_per_job(tmp_path, monkeypatch
         },
     )
     collector = OracleCollector(
-        cfg={"db": "DB_MAIN"},
+        app_config=AppConfig({"collectors": {"oracle": {"db": "DB_MAIN"}}}),
         store=store,
         logger=log,
         connection_manager=manager,
@@ -272,7 +273,7 @@ def test_oracle_collector_passes_config_into_job_query(tmp_path, monkeypatch) ->
         },
     )
     collector = OracleCollector(
-        cfg={"db": "DB_MAIN", "query_params": {"threshold": 77}},
+        app_config=AppConfig({"collectors": {"oracle": {"db": "DB_MAIN", "query_params": {"threshold": 77}}}}),
         store=store,
         logger=log,
         connection_manager=manager,
@@ -350,7 +351,7 @@ def test_oracle_collector_continues_after_job_error(tmp_path, monkeypatch) -> No
         },
     )
     collector = OracleCollector(
-        cfg={"db": "DB_MAIN"},
+        app_config=AppConfig({"collectors": {"oracle": {"db": "DB_MAIN"}}}),
         store=store,
         logger=log,
         connection_manager=manager,
@@ -436,7 +437,7 @@ def test_oracle_collector_cursor_acquire_timeout(tmp_path, monkeypatch) -> None:
         },
     )
     collector = OracleCollector(
-        cfg={"db": "DB_MAIN"},
+        app_config=AppConfig({"collectors": {"oracle": {"db": "DB_MAIN"}}}),
         store=store,
         logger=log,
         connection_manager=manager,

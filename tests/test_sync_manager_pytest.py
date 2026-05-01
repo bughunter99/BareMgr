@@ -2,6 +2,7 @@ from pathlib import Path
 
 from src.logger import Logger
 from src.syncmanager import SyncJobManager, SyncOracleToOracle
+from src.appconfig import AppConfig
 
 
 def test_sync_manager_dry_run_no_oracle_connection(tmp_path: Path) -> None:
@@ -20,7 +21,7 @@ def test_sync_manager_dry_run_no_oracle_connection(tmp_path: Path) -> None:
     }
 
     log = Logger(name="test.sync", log_base=str(tmp_path / "logs" / "sync"), console=False)
-    mgr = SyncJobManager(cfg=cfg, logger=log)
+    mgr = SyncJobManager(app_config=AppConfig(cfg), logger=log)
     try:
         mgr.run({"job_name": "sync"})
     finally:
@@ -41,7 +42,7 @@ def test_sync_workers_come_from_config(tmp_path: Path) -> None:
 
     log = Logger(name="test.sync.workers", log_base=str(tmp_path / "logs" / "sync-workers"), console=False)
 
-    mgr = SyncJobManager(cfg=cfg, logger=log)
+    mgr = SyncJobManager(app_config=AppConfig(cfg), logger=log)
     try:
         # workers 설정이 section_cfg에서 올바르게 읽히는지 확인
         assert mgr._cfg.get("workers") == 3
@@ -88,7 +89,7 @@ def test_sync_validates_connection_before_table_sync(tmp_path: Path, monkeypatch
     }
 
     log = Logger(name="test.sync.validate", log_base=str(tmp_path / "logs" / "sync-validate"), console=False)
-    syncer = SyncOracleToOracle(cfg=cfg, logger=log)
+    syncer = SyncOracleToOracle(app_config=AppConfig(cfg), logger=log)
     monkeypatch.setattr(syncer._conn_manager, "get_connection", lambda dsn, **_: FakeConnection())
     monkeypatch.setattr(SyncOracleToOracle, "_copy_table_full", lambda self, table: 0)
 

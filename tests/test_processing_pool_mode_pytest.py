@@ -3,6 +3,7 @@ from pathlib import Path
 from src.logger import Logger
 from src.businessmanager import ProcessingPipeline
 from src.store import Store
+from src.appconfig import AppConfig
 
 
 def test_processing_switches_to_thread_when_worker_lookup_enabled(tmp_path: Path) -> None:
@@ -39,7 +40,7 @@ def test_processing_switches_to_thread_when_worker_lookup_enabled(tmp_path: Path
 
     store.upsert_many("inventory", [{"id": "1"}])
 
-    pipeline = ProcessingPipeline(cfg=cfg, store=store, logger=logger)
+    pipeline = ProcessingPipeline(store=store, logger=logger, app_config=AppConfig(cfg))
     try:
         pipeline.run({"job_name": "processing"})
         rows = store.query(

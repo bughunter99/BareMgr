@@ -3,16 +3,25 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import TYPE_CHECKING
 
 import zmq
 
 from .failovernode import FailoverNode
 from .logger import Logger
 
+if TYPE_CHECKING:
+    from .appconfig import AppConfig
+
 
 class FailoverNodeZmq(FailoverNode):
-    def __init__(self, config_file: str, logger: Logger | None = None):
-        super().__init__(config_file=config_file, logger=logger)
+    def __init__(
+        self,
+        config_file: str,
+        logger: Logger | None = None,
+        app_config: "AppConfig | None" = None,
+    ):
+        super().__init__(config_file=config_file, logger=logger, app_config=app_config)
         failover_cfg = self.config.get("failover", {})
         zmq_cfg = failover_cfg.get("zmq", {})
         # Backward compatibility:

@@ -5,6 +5,7 @@ from src.basecollector import BaseCollector
 from src.logger import Logger
 from src.apporchestrator import AppOrchestrator
 from src.store import Store
+from src.appconfig import AppConfig
 
 
 def test_orchestrator_processing_runs_only_when_active(tmp_path: Path) -> None:
@@ -30,7 +31,7 @@ def test_orchestrator_processing_runs_only_when_active(tmp_path: Path) -> None:
         },
     }
 
-    orch = AppOrchestrator(cfg=cfg, logger=log, processing_callback=on_processing, sync_callback=on_sync)
+    orch = AppOrchestrator(logger=log, processing_callback=on_processing, sync_callback=on_sync, app_config=AppConfig(cfg))
     try:
         orch.start()
         time.sleep(1.3)
@@ -67,7 +68,7 @@ def test_orchestrator_runs_immediately_on_active_transition(tmp_path: Path) -> N
         },
     }
 
-    orch = AppOrchestrator(cfg=cfg, logger=log, processing_callback=on_processing, sync_callback=on_sync)
+    orch = AppOrchestrator(logger=log, processing_callback=on_processing, sync_callback=on_sync, app_config=AppConfig(cfg))
     try:
         orch.start()
         time.sleep(0.2)
@@ -116,11 +117,11 @@ def test_orchestrator_collector_runs_immediately_on_active_transition(tmp_path: 
     }
 
     orch = AppOrchestrator(
-        cfg=cfg,
         logger=log,
         processing_callback=on_processing,
         sync_callback=on_sync,
         collectors=[collector],
+        app_config=AppConfig(cfg),
     )
     try:
         orch.start()

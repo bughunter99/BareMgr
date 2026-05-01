@@ -8,29 +8,32 @@ import re
 import sqlite3
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .db_registry import build_registry, resolve_dsn, resolve_pool_cfg
+from .db_registry import resolve_dsn, resolve_pool_cfg
 from .logger import Logger
 from .oracleconnectionmanager import OracleConnectionManager
 from .oracle_driver import get_cx_oracle
 from .oracle_utils import validate_oracle_connection
 from .store import Store
 
+if TYPE_CHECKING:
+    from .appconfig import AppConfig
+
 
 class EtcManager:
     def __init__(
         self,
-        cfg: dict[str, Any],
         store: Store,
         logger: Logger,
         connection_manager: OracleConnectionManager | None = None,
+        app_config: "AppConfig | None" = None,
     ) -> None:
-        self._cfg = cfg
+        self._app_config = app_config
         self._store = store
         self._logger = logger
 
-        etc_cfg = cfg.get("etc", {}) or cfg.get("pipeline", {}).get("etc", {})
+        etc_cfg = (app_config.section("etc") or app_config.section("pipeline", "etc") or {}) if app_config is not None else {}
         self.enabled = bool(etc_cfg.get("enabled", False))
         self._workers = max(1, int(etc_cfg.get("workers", 1)))
         self._tasks = list(etc_cfg.get("tasks", []))
@@ -74,7 +77,7 @@ class EtcManager:
         self._etc_conn.commit()
         self._etc_lock = threading.Lock()
 
-        db_registry = build_registry(cfg)
+        db_registry = app_config.db_registry if app_config is not None else {}
         # db alias로만 Oracle 연결을 해석한다.
         db_alias = str(etc_cfg.get("db", "")).strip()
         oracle_cfg = etc_cfg.get("oracle", {}) or {}
@@ -160,7 +163,7 @@ class EtcManager:
         table = str(task.get("table", "etc_heartbeat"))
         row = {
             "task": name,
-            "node_id": self._cfg.get("node_id", "node"),
+            "node_id": self._app_config.node_id if self._app_config is not None else "node",
             "status": "ok",
             "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }

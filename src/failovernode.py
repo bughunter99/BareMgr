@@ -4,14 +4,23 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import threading
 import time
+from typing import TYPE_CHECKING
 
 from .config_loader import load_config
 from .logger import Logger
 
+if TYPE_CHECKING:
+    from .appconfig import AppConfig
+
 
 class FailoverNode(ABC):
-    def __init__(self, config_file: str, logger: Logger | None = None):
-        self.config = load_config(config_file)
+    def __init__(
+        self,
+        config_file: str,
+        logger: Logger | None = None,
+        app_config: "AppConfig | None" = None,
+    ):
+        self.config = app_config.raw if app_config is not None else load_config(config_file)
         failover_cfg = self.config.get("failover", {})
         logging_cfg = self.config.get("logging", {})
 

@@ -9,7 +9,7 @@ from .querybbb import QueryBBB
 from .queryccc import QueryCCC
 from .queryddd import QueryDDD
 from .queryeee import QueryEEE
-from .db_registry import build_registry, resolve_dsn
+from .db_registry import resolve_dsn
 from .logger import Logger
 from .oracleconnectionmanager import OracleConnectionManager
 from .processing import ProcessingBase
@@ -24,7 +24,6 @@ class BusinessManager(ProcessingBase):
 
     def __init__(
         self,
-        cfg: dict[str, Any],
         store: Store,
         logger: Logger,
         connection_manager: OracleConnectionManager | None = None,
@@ -32,16 +31,15 @@ class BusinessManager(ProcessingBase):
         **_: Any,
     ) -> None:
         self._app_config = app_config
-        self._root_cfg = cfg
         self._store = store
         self._connection_manager = connection_manager
 
-        section = cfg.get("pipeline", {}).get("business", {})
+        section = (app_config.section("pipeline", "business") or {}) if app_config is not None else {}
         self._section = section
         self._input_tables = [str(t) for t in (section.get("input_tables", []) or [])]
         self._input_limit = max(1, int(section.get("input_limit_per_table", 200)))
         self._output_table = str(section.get("output_table", "pipeline_business_results"))
-        self._db_registry = app_config.db_registry if app_config is not None else build_registry(cfg)
+        self._db_registry = app_config.db_registry if app_config is not None else {}
         self._oracle_cfg = section.get("oracle", {}) or {}
         self._oracle_db_alias = str(self._oracle_cfg.get("db", "") or self._oracle_cfg.get("source_db", "")).strip()
         self._oracle_dsn = self._resolve_oracle_dsn(self._oracle_cfg)

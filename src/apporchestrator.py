@@ -10,6 +10,7 @@ from .logger import Logger
 if TYPE_CHECKING:
     from .basecollector import BaseCollector
     from .replicator import Replicator
+    from .appconfig import AppConfig
 
 
 class _PeriodicJobRunner:
@@ -114,16 +115,16 @@ class _PeriodicJobRunner:
 class AppOrchestrator:
     def __init__(
         self,
-        cfg: dict[str, Any],
         logger: Logger,
         processing_callback: Callable[[dict[str, Any]], None],
         sync_callback: Callable[[dict[str, Any]], None],
         etc_callback: Callable[[dict[str, Any]], None] | None = None,
         collectors: list[BaseCollector] | None = None,
         replicator: Replicator | None = None,
+        app_config: "AppConfig | None" = None,
     ) -> None:
-        pipeline_cfg = cfg.get("pipeline", {})
-        sync_cfg = cfg.get("syncmanager", {}) or pipeline_cfg.get("syncmanager", {})
+        pipeline_cfg = (app_config.section("pipeline") or {}) if app_config is not None else {}
+        sync_cfg = (app_config.section("syncmanager") or app_config.section("pipeline", "syncmanager") or {}) if app_config is not None else {}
 
         self._processing = _PeriodicJobRunner(
             name="business",
@@ -139,7 +140,7 @@ class AppOrchestrator:
         )
         self._etc = None
         if etc_callback is not None:
-            etc_cfg = cfg.get("etc", {}) or pipeline_cfg.get("etc", {})
+            etc_cfg = (app_config.section("etc") or app_config.section("pipeline", "etc") or {}) if app_config is not None else {}
             self._etc = _PeriodicJobRunner(
                 name="etc",
                 cfg=etc_cfg,

@@ -6,6 +6,7 @@ import sys
 from src.etcmanager import EtcManager
 from src.logger import Logger
 from src.store import Store
+from src.appconfig import AppConfig
 
 
 def test_etc_manager_runs_heartbeat_and_logs(tmp_path: Path) -> None:
@@ -32,7 +33,7 @@ def test_etc_manager_runs_heartbeat_and_logs(tmp_path: Path) -> None:
         },
     }
 
-    mgr = EtcManager(cfg=cfg, store=store, logger=log)
+    mgr = EtcManager(store=store, logger=log, app_config=AppConfig(cfg))
     try:
         mgr.run({"job_name": "etc"})
 
@@ -95,7 +96,7 @@ def test_etc_workers_come_from_config(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr("src.etcmanager.ThreadPoolExecutor", FakeExecutor)
 
-    mgr = EtcManager(cfg=cfg, store=store, logger=log)
+    mgr = EtcManager(store=store, logger=log, app_config=AppConfig(cfg))
     try:
         mgr.run({"job_name": "etc"})
         assert created_workers == [2]
@@ -147,7 +148,7 @@ def test_etc_oracle_probe_validates_connection_first(tmp_path: Path, monkeypatch
         },
     }
 
-    mgr = EtcManager(cfg=cfg, store=store, logger=log)
+    mgr = EtcManager(store=store, logger=log, app_config=AppConfig(cfg))
     try:
         mgr.run({"job_name": "etc"})
         assert "SELECT 1 FROM dual" in executed_sql

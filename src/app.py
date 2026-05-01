@@ -25,8 +25,6 @@ import signal
 import threading
 import time
 import re
-from typing import Any
-
 from .appconfig import AppConfig
 from .basecollector import BaseCollector
 from .etcmanager import EtcManager
@@ -48,19 +46,18 @@ from .syncmanager import SyncManager
 class App:
     def __init__(self, config_file: str) -> None:
         self._app_config = AppConfig.from_file(config_file)
-        self._cfg: dict[str, Any] = self._app_config.raw
         logging_cfg = self._app_config.logging_cfg
 
         # ── 로거 ─────────────────────────────────────────────────────
         self._logger = Logger(
-            name=f"app.{self._cfg['node_id']}",
-            log_base=logging_cfg.get("log_base", self._cfg.get("log_base", "logs/app")),
+            name=f"app.{self._app_config.node_id}",
+            log_base=logging_cfg.get("log_base", self._app_config.get("log_base", "logs/app")),
             traceback=bool(logging_cfg.get("traceback", False)),
         )
-        init_oracle_client_from_config(self._cfg, logger=self._logger)
+        init_oracle_client_from_config(self._app_config.raw, logger=self._logger)
         self._db_registry = self._app_config.db_registry
         oracle_cfg = self._app_config.oracle_cfg
-        collector_oracle_cfg = self._cfg.get("collectors", {}).get("oracle", {}) or {}
+        collector_oracle_cfg = self._app_config.collectors_cfg.get("oracle", {}) or {}
         configured_timeout = oracle_cfg.get(
             "cursor_acquire_timeout_sec",
             collector_oracle_cfg.get("cursor_acquire_timeout_sec", 30.0),
@@ -76,48 +73,46 @@ class App:
         )
 
         # ── 저장소 ───────────────────────────────────────────────────
-        node_id = str(self._cfg.get("node_id", "")).strip()
+        node_id = self._app_config.node_id
         m = re.match(r"^node(\d+)$", node_id, re.IGNORECASE)
         default_sqlite_base = f"data/app{m.group(1)}" if m else f"data/{node_id or 'app'}"
         sqlite_base_dir = str(
-            (self._cfg.get("sqlite", {}) or {}).get("path", default_sqlite_base)
+            self._app_config.section("sqlite", "path") or default_sqlite_base
         ).strip()
         self._store = Store(
             sqlite_base_dir,
             logger=self._logger,
             app_config=self._app_config,
-            replication_cfg=self._cfg.get("replication", {}),
-            sqlite_connections=self._cfg.get("sqlite_connections", []),
-            object_sqlite_types=self._cfg.get("object_sqlite_types", []),
-            object_sqlite_done_dir=self._cfg.get("object_sqlite_done_dir"),
-            write_lock_timeout=float(self._cfg.get("write_lock_timeout", 30.0)),
+            replication_cfg=self._app_config.get("replication", {}),
+            sqlite_connections=self._app_config.get("sqlite_connections", []),
+            object_sqlite_types=self._app_config.get("object_sqlite_types", []),
+            object_sqlite_done_dir=self._app_config.get("object_sqlite_done_dir"),
+            write_lock_timeout=float(self._app_config.get("write_lock_timeout", 30.0)),
         )
         self._store.initialize_registered_ddls()
 
         # ── 복제기 ───────────────────────────────────────────────────
         _replicator = Replicator(
-            cfg=self._cfg["replication"],
             store=self._store,
             logger=self._logger,
+            app_config=self._app_config,
         )
         self._business_manager = BusinessManager(
-            cfg=self._cfg,
             app_config=self._app_config,
             store=self._store,
             logger=self._logger,
             connection_manager=self._oracle_connection_manager,
         )
         self._sync_manager = SyncManager(
-            cfg=self._cfg,
             app_config=self._app_config,
             logger=self._logger,
             connection_manager=self._oracle_connection_manager,
         )
         self._etc_manager = EtcManager(
-            cfg=self._cfg,
             store=self._store,
             logger=self._logger,
             connection_manager=self._oracle_connection_manager,
+            app_config=self._app_config,
         )
 
         # ── 수집기 목록 ─────────────────────────────────────────────
@@ -129,13 +124,13 @@ class App:
 
         # ── 주기 작업 오케스트레이터 ─────────────────────────────────
         self._orchestrator = AppOrchestrator(
-            cfg=self._cfg,
             logger=self._logger,
             processing_callback=self._business_manager.run,
             sync_callback=self._sync_manager.run,
             etc_callback=self._etc_manager.run,
             collectors=_collectors,
             replicator=_replicator,
+            app_config=self._app_config,
         )
 
         # 상태 전환 감시 스레드
@@ -146,12 +141,11 @@ class App:
     # ── 수집기 등록 ──────────────────────────────────────────────────
     def _build_collectors(self) -> list[BaseCollector]:
         collectors: list[BaseCollector] = []
-        col_cfg = self._cfg.get("collectors", {})
+        col_cfg = self._app_config.collectors_cfg
 
         if col_cfg.get("oracle", {}).get("enabled"):
             collectors.append(
                 OracleCollector(
-                    cfg=col_cfg["oracle"],
                     app_config=self._app_config,
                     store=self._store,
                     logger=self._logger,
@@ -161,27 +155,27 @@ class App:
             )
 
         # splunk은 최상위 레벨에서 읽고, 없으면 collectors.splunk fallback
-        splunk_cfg = self._cfg.get("splunk", {}) or col_cfg.get("splunk", {})
+        splunk_cfg = self._app_config.get("splunk", {}) or col_cfg.get("splunk", {})
         if splunk_cfg.get("enabled"):
             collectors.append(
                 SplunkCollector(
-                    cfg=splunk_cfg,
                     store=self._store,
                     logger=self._logger,
                     on_collect=self._on_collect,
+                    app_config=self._app_config,
                 )
             )
 
         return collectors
 
     def _build_failover_node(self, config_file: str) -> FailoverNode:
-        failover_cfg = self._cfg.get("failover", {})
+        failover_cfg = self._app_config.get("failover", {})
         backend = str(failover_cfg.get("backend", "zmq")).strip().lower()
 
         if backend == "zmq":
-            return FailoverNodeZmq(config_file=config_file, logger=self._logger)
+            return FailoverNodeZmq(config_file=config_file, logger=self._logger, app_config=self._app_config)
         if backend == "db":
-            return FailoverNodeDb(config_file=config_file, logger=self._logger)
+            return FailoverNodeDb(config_file=config_file, logger=self._logger, app_config=self._app_config)
 
         raise ValueError(f"Unsupported failover.backend: {backend}")
 
@@ -235,8 +229,8 @@ class App:
     def start(self) -> None:
         self._logger.info(
             "[App] starting node_id=%s weight=%s",
-            self._cfg["node_id"],
-            self._cfg["weight"],
+            self._app_config.node_id,
+            self._app_config.get("weight"),
         )
         self._running = True
 

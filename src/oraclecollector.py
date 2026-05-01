@@ -27,24 +27,24 @@ if TYPE_CHECKING:
 class OracleCollector(BaseCollector):
     def __init__(
         self,
-        cfg: dict,
         store: "Store",
         logger: "Logger",
         on_collect=None,
         connection_manager: OracleConnectionManager | None = None,
         app_config: "AppConfig | None" = None,
     ) -> None:
+        oracle_cfg = (app_config.collectors_cfg.get("oracle", {}) or {}) if app_config is not None else {}
         super().__init__(
             name="oracle",
-            interval_sec=cfg.get("interval_sec", 60),
+            interval_sec=oracle_cfg.get("interval_sec", 60),
             store=store,
             logger=logger,
             on_collect=on_collect,
         )
-        self._cfg: dict = cfg
+        self._oracle_cfg: dict = oracle_cfg
         self._jobs: list[OracleJob] = list(ORACLE_JOBS)
-        self._test_cfg: dict = cfg.get("test", {})
-        self._test_mode: bool = cfg.get("test_mode", False) or self._test_cfg.get("enabled", False)
+        self._test_cfg: dict = oracle_cfg.get("test", {})
+        self._test_mode: bool = oracle_cfg.get("test_mode", False) or self._test_cfg.get("enabled", False)
         self._test_rows: int = int(self._test_cfg.get("rows", 5000))
         self._test_emit_once: bool = self._test_cfg.get("emit_once", True)
         self._test_emitted: bool = False
@@ -88,7 +88,7 @@ class OracleCollector(BaseCollector):
                         job_db_alias,
                     ) as cursor:
                         started_at = time.perf_counter()
-                        runtime_cfg = dict(self._cfg)
+                        runtime_cfg = dict(self._oracle_cfg)
                         runtime_cfg["_last_ts"] = self._last_ts[job.name]
                         rows = job.query(runtime_cfg, cursor)
                     collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

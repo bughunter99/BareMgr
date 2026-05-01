@@ -8,6 +8,7 @@ from src.oracleconnectionmanager import OracleConnectionManager
 from src.oraclecollector import OracleCollector
 from src.businessmanager import ProcessingPipeline
 from src.store import Store
+from src.appconfig import AppConfig
 
 
 def test_processing_pipeline_generates_logs_and_output(tmp_path: Path) -> None:
@@ -48,7 +49,7 @@ def test_processing_pipeline_generates_logs_and_output(tmp_path: Path) -> None:
 
     store.upsert_many("inventory", [{"id": "1", "name": "a"}, {"id": "2", "name": "b"}])
 
-    pipeline = ProcessingPipeline(cfg=cfg, store=store, logger=log)
+    pipeline = ProcessingPipeline(store=store, logger=log, app_config=AppConfig(cfg))
     try:
         pipeline.run({"job_name": "processing"})
 
@@ -112,7 +113,7 @@ def test_processing_logs_job_id_when_worker_dequeues_entry(tmp_path: Path) -> No
 
     store.upsert_many("inventory", [{"id": "1", "name": "a"}])
 
-    pipeline = ProcessingPipeline(cfg=cfg, store=store, logger=log)
+    pipeline = ProcessingPipeline(store=store, logger=log, app_config=AppConfig(cfg))
     try:
         pipeline.run({"job_name": "processing"})
         assert any("dequeued entry obj_id=node-test-" in line for line in captured_logs)
@@ -229,12 +230,12 @@ def test_processing_and_collector_share_connection_manager_for_same_dsn(tmp_path
     store.upsert_many("inventory", [{"id": "1", "name": "a"}])
 
     collector = OracleCollector(
-        cfg=cfg["collectors"]["oracle"],
+        app_config=AppConfig(cfg),
         store=store,
         logger=log,
         connection_manager=manager,
     )
-    pipeline = ProcessingPipeline(cfg=cfg, store=store, logger=log, connection_manager=manager)
+    pipeline = ProcessingPipeline(store=store, logger=log, connection_manager=manager, app_config=AppConfig(cfg))
     try:
         collector.collect()
         pipeline.run({"job_name": "processing"})
